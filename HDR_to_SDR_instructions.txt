@@ -1,0 +1,34 @@
+Here you'll find instructions on how to convert High Dynamic Range (HDR) files
+to Standard Dynamic Range (SDR) ones. The below assumes you already have FFmpeg
+compiled with support for the "z library" (zimg) as it needs the zscale filter
+(--enable-libzimg in FFmpeg's configure script).
+
+https://github.com/sekrit-twc/zimg
+
+Most UltraHD Blu-Ray releases come in 10-bits (YUV420P10 pixel format),
+BT.2020 color space and HDR tone mapping. To convert them to SDR with ffxvid,
+follow the below instructions.
+
+- Answer 'y' to "Pixel Format Conversion" and select YUV420P (for 8-bit
+  encoding)
+
+- Answer 'y' to "HDR to SDR Conversion" and choose the tone mapping algorithm.
+  I prefer Mobius but you are free to experiment with the other options. Next,
+  choose the color space option you want. The options presented are pretty
+  obvious.
+  
+- (Optional): if colors look too bleak (desaturated) here and there, you can
+  apply a "color saturation correction" and increase the saturation strength
+  until you are satisfied.
+  This is a sub-option part of the "HDR to SDR Conversion" option.
+  
+- (Optional): Scale down the input to appropriate resolution if you are targeting
+  HD/Full HD/NTSC/PAL output.
+
+That's all there really is to it. The zscale and tonemap filters will do all the
+work for you. I cannot guarantee 100% success rate, but I've done a handful of
+HDR to SDR conversions myself of UHD Blu-rays targeting Full HD output and all
+of the encodes were able to be decoded by my (a bit ageing) devices without a
+single issue and everything looks OK to my eyes.
+
+If you have further questions, don't hesitate to contact me. :)

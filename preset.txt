@@ -1,0 +1,7 @@
+# Example of a custom preset file for ffxvid
+# Can be loaded with: ffxvid -c /path/to/this/file/preset.txt
+
+# Constant quantizer
+CQ="2"
+
+XVIDPARAMS="-flags +mv4+aic+cgop -me_quality 6 -bf 2 -mbd 2 -mpeg_quant 1 -variance_aq 1 -trellis 1"

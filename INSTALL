@@ -1,0 +1,17 @@
+
+To install ffxvid:
+
+  * open a terminal and cd to its directory
+  * run: sudo make install
+  
+  To install in a non-standard directory, run:
+  
+  * sudo make install PREFIX=/your/directory
+
+To uninstall ffxvid:
+  
+  * As above, but this time run: sudo make uninstall
+
+  If installed with a different prefix, run:
+
+  * sudo make uninstall PREFIX=/your/directory

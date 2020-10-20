@@ -1,0 +1,387 @@
+2020-06-21 - ffxvid 1.6.9
+	* Fixed a bug that prevents using TrueHD mono audio
+	  in the MP4 container
+
+2020-06-16 - ffxvid 1.6.8
+	* Support TrueHD audio in the MP4 container
+
+2020-03-23 - ffxvid 1.6.6
+	* Add -max_muxing_queue_size switch to workaround
+	  possible issues when muxing Atmos/DTS-X audio
+
+2020-03-09 - ffxvid 1.6.5
+	* Bugfix: missing if conditional in the crop code
+
+2020-03-05 - ffxvid 1.6.4
+	* Go back to FFmpeg for crop detection
+
+2020-02-23 - ffxvid 1.6.3
+	* Use MPlayer for crop detection instead of FFmpeg which
+	  seems to have issues with 4k/UHD content
+
+2019-12-28 - ffxvid 1.6.2
+	* Add support for the noise video filter. Can be beneficial
+	  on (very) clean sources by applying some noise to avoid
+	  things like color/light banding in the encode
+
+2019-11-11 - ffxvid 1.6.1
+	* Added support for the (newer) deblock filter
+
+2019-11-04 - ffxvid 1.6.0
+	* Merged two case statements in the metadata code for mkv/mp4/mov
+	* Bugfix: Using ADPCM encoding for DTS audio wasn't possible due
+	  to wrong variable used in the if conditional
+	  
+2019-10-29 - ffxvid 1.5.9
+	* Removed an unneeded check for audio codec in the conerror_func()
+	  function
+	* Removed a stale "" in the case statement that checks the channels
+	  for AC3
+	* Support setting the matrixed stereo type when resampling stereo
+	  input
+	* Support setting the filter type of the audio resample filter
+	* Cosmetics
+
+2019-10-28 - ffxvid 1.5.8
+	* Added support for director/cast metadata for MP4/M4V/MOV
+	* Added +use_metadata_tags to the $movflags variable for MP4/M4V/MOV
+	* Support ADPCM encoding for DTS audio
+	* Fixed an issue where asking for director/cast occured multiple
+	  times if remuxing to other containers was enabled
+
+2019-10-27 - ffxvid 1.5.7
+	* Use 16 bits as bit depth metadata when encoding to TrueHD audio
+	* Removed an unneeded if conditional in the audio bit depth code
+	* Add director and cast metadata for the MKV container
+	* Reorder some code for the output shell file
+	* Cosmetics
+
+2019-10-26 - ffxvid 1.5.6
+	* Renamed audio variable aid[i] to aidx[i] and moved it outside
+	  of the if conditional that decides the audio codec. This
+	  removes the same code in three places and now uses the
+	  global aidx[i] variable
+	* HE-AACv2 only supports 2 channels. Update the audio code
+	  to reflect that
+	* When running in batch mode, add a warning about automatic
+	  audio metadata and offer an option to enable/disable it
+	* Added -tmp option to MP4Box to store temp files in the
+	  output directory
+	* Some minor improvements to the audio options
+
+2019-10-25 - ffxvid 1.5.5
+	* Detect audio bit depth and add it to the audio metadata
+	* Added detection for DTS Express and DTS-HD HR for audio copy
+	* Use -show_entries instead of -show_streams for detecting
+	  audio properties with ffprobe. Removes piping to grep and awk
+	* Support setting the FLAC bit depth for encoding
+	* Minor restructuring and variables renaming in the audio code
+	* Updated the man page
+
+2019-10-24 - ffxvid 1.5.4
+	* Add constant/non-constant matrix option to the
+	  video_csmisc_func() function
+
+2019-10-23 - ffxvid 1.5.3
+	* Set default audio codec based on output container format
+	* Add colr option for MP4Box to the video_colorspace_func()
+	  function and the color primaries code. Only used for MOV
+	* Add -color_primaries, -color_trc and -colorspace to the
+	  FFmpeg command line options
+
+2019-10-22 - ffxvid 1.5.2
+	* Add support for SRT/SSA/AAS subtitles for the MOV container
+	* Remove the colorprim lines from the video_colorspace_func()
+	  function. They are not used
+
+2019-10-21 - ffxvid 1.5.1
+	* Renamed variables $MDATA and $CHPS to $METADATA
+	  and $CHAPS
+	* Add $METADATA and $CHAPS to the remuxing code
+
+2019-10-21 - ffxvid 1.5.0
+	* Add support for verbose logging to a log file
+	* Bugfix: -map_metadata and -map_chapters where not set
+	  to 0 when the respective options in the config file
+	  were set to "y"
+
+2019-10-20 - ffxvid 1.4.9
+	* Added support for embedding of SRT/SSA/ASS subtitles
+	  in the MP4/M4V containers
+	* Moved back to MP4Box for adding cover art to MP4/M4V/MOV.
+	  Apparently, after lots of testing, atomicparsley
+	  creates files that hang during playback
+	* Cosmetics
+	* Updated the man page
+
+2019-10-19 - ffxvid 1.4.8
+	* Use atomicparsley to add cover art for the mp4/m4v
+	  containers. This removes dependence on MP4Box and
+	  makes it possible to copy over metadata info in
+	  an easy way
+	* Add +frag_keyframe to the -movflags option when
+	  output is mp4
+	* Renamed variable METACOVER to MKVCOVER
+	* Updated the man page
+
+2019-10-18 - ffxvid 1.4.7
+	* Bugfix: use correct video track for crop
+	  preview with MPlayer
+	* Bugfix: missing ;; in the additional container
+	  formats code
+	* Renamed variable SCAN_MULTIPLE_VID_TRACKS to
+	  SCAN_MULTI_VID_TRACKS
+	* Some reordering in the config file
+	* Set Catmull-Rom as default Bicubic/Spline tuning
+	* Add LPCM detection for audio copy
+	* Support the mp4/m4v containers
+	* Add support for cover art for the mp4/m4v/mov
+	  containers. Requires MP4Box from GPAC
+	* Some code optimization
+
+2019-10-17 - ffxvid 1.4.6
+	* Support the WMV container format
+
+2019-10-16 - ffxvid 1.4.5
+	* Support the fftdnoiz denoise filter
+
+2019-10-15 - ffxvid 1.4.4
+	* Use correct video mapping for crop detection
+
+2019-10-14 - ffxvid 1.4.3
+	* Support scanning for multiple video tracks
+	  in the input file
+
+2019-10-13 - ffxvid 1.4.2
+	* Use readlink -e and realpath -e where needed
+	* Cosmetics
+
+2019-10-11 - ffxvid 1.4.1
+	* Support hardcoding external or embedded subtitles.
+	  Requires libass support in FFmpeg
+	* Fixed a typo in the subtitles code
+
+2019-09-25 - ffxvid 1.4.0
+	* Revert using audindex[i] var for audio metadata
+	  detection
+
+2019-09-25 - ffxvid 1.3.9
+	* Use the audindex[i] variable for audio metadata
+	  during audio copy
+	* Don't use audio metadata when using audio copy
+	  and running in batch mode
+	* Updated default audio bitrates for some codecs
+	  
+2019-09-22 - ffxvid 1.3.8
+	* For audio stream copy, in case ffprobe reports
+	  channels layout as unknown, try to guess the
+	  amount of channels based on channel detection
+	  and use that as metadata
+	* Set Mobius transform as default for HDR to SDR
+	* Updated the man page
+
+2019-09-21 - ffxvid 1.3.7
+	* Add side channel info to the audio metadata
+
+2019-09-19 - ffxvid 1.3.6
+	* Support encoding to WMAv1 and WMAv2 audio
+	* Update high bit depth pixel formats options
+	* Add WMAv1 and WMAv2 audio detection metadata
+	  when doing audio copy
+
+2019-09-18 - ffxvid 1.3.5
+	* Improvements to the audio copy metadata
+
+2019-09-13 - ffxvid 1.3.4
+	* Add audio channel metadata when using audio copy
+
+2019-09-05 - ffxvid 1.3.3
+	* Code optimization in the audio sample rate metadata
+
+2019-08-29 - ffxvid 1.3.2
+	* Use a comma instead of a dash for the audio sample
+	  rate metadata
+
+2019-08-21 - ffxvid 1.3.1
+	* Add audio sample rate to the audio metadata
+
+2019-07-23 - ffxvid 1.3.0
+	* Added support for crop preview using MPlayer when
+	  autocrop is enabled in the config file. This was
+	  ported over from my h264enc script
+	  
+2019-06-14 - ffxvid 1.2.9
+	* Added support for the bm3d denoise filter
+	
+2018-02-26 - ffxvid 1.2.8
+	* Set the eq saturation default value to 1.0 (same as filter default)
+	* Add the colorspace and colormatrix filters when doing an HDR
+	  to SDR conversion
+	* Lower tonemap desat strength to 2.8
+	* Support white point adaptation for HDR to SDR
+	* Moved the colorspace filter after the scale one
+	* Moved the pixel format filter near the end of the filter chain
+	
+2018-02-20 - ffxvid 1.2.7
+	* Fixed an issue where in some cases write-testing the output
+	  directory will fail due usage of readlink -f instead of
+	  readlink -m
+	* Update transfer chars to support latest changes to zimg from git
+	  
+2018-01-09 - ffxvid 1.2.6
+	* Moved the eq filter to almost the end of the video filter chain
+	  as it can lead to banding in certain cases in case the filter
+	  is in front of most other ones
+	* If the eq filter is used, also insert the format one after it
+	  if a pixel format has been chosen
+	* Fixed a possible devision by 0 that may occur when one copies
+	  audio and the bitrate for metadata is reported as N/A by ffprobe
+	
+2018-01-04 - ffxvid 1.2.5
+	* Don't hardcode the desaturation strength of the tonemap filter
+	  but let is be an option
+	* Removed the matrix and primaries options in the zscale filter
+	  as it leads to over-saturation of colors
+	* Support tweaking the tonemap algorithms for HDR to SDR conversion
+	* Support applying color saturation correction when doing an HDR
+	  to SDR conversion
+	* Added bt2020-12 to the list of transfers when doing color
+	  characteristics copy
+	* Added HDR_to_SDR_instructions.txt file to the package
+	  
+2018-01-01 - ffxvid 1.2.4
+	* Reworked the video_chars_func() function and added reporting
+	  of video bit depth
+	* Initial support for audio codec metadata when doing audio
+	  copy
+	* Increased default E-AC-3 audio bitrate from 768 to 960 kbps
+	* Set dialnorm for AC-3/E-AC-3 to its FFmpeg default (-31)
+	* Use a desat value of 2.5 for the tonemap filter when doing HDR
+	  to SDR conversions
+	* Don't use pix_fmts in the format filter. It is not really needed
+	* Removed 12-bit options from the video_pixfmt_func() function
+	* Cosmetics
+	  
+2017-12-27 - ffxvid 1.2.3
+	* Renamed array variable CHARS to VCHARS in the
+	  video_chars_func() function
+	* Report pixel format in the video_chars_func() function
+	* Use -v quiet instead of -v error log level for ffprobe
+	* Cosmetics
+	  
+2017-12-26 - ffxvid 1.2.2
+	* Initial support for HDR to SDR conversions. Requires
+	  FFmpeg to be compiled with the zimg library as it
+	  needs the zscale filter
+	  https://github.com/sekrit-twc/zimg
+	  
+2017-10-22 - ffxvid 1.2.1
+	* Support dialog level normalization for AC3/EAC3 audio
+	
+2017-09-29 - ffxvid 1.2.0
+	* Support setting the output video aspect ratio
+	
+2017-08-23 - ffxvid 1.1.9
+	* Support full chroma input for the software scaler
+	
+2017-07-20 - ffxvid 1.1.8
+	* Bugfix: use realpath instead of readlink for the OUTPUT
+	  var when running in batch mode. Fixes the issue where
+	  readlink will follow the full path in case the input
+	  is a symlink which may result of encoding files we
+	  were not asked to
+	* Don't print cropped resolution during runtime
+	  if batch mode is selected
+	* Remove check for realpath. It is now required and not
+	  optional
+
+2017-06-14 - ffxvid 1.1.7
+	* Make software scaler tweaking optional
+	* Added support for the unsharp filter for sharpen/blur
+	* Use a colon symbol as separation for input/output color range
+	  in the video_colorspace_func() function as to be consistent
+	  with the other options. Also set the default to tv:tv
+	
+2017-06-13 - ffxvid 1.1.6
+	* Bugfix in the video_colorspace_func() function. Wrong value
+	  used for the ispace option of the filter. Must be bt2020ncl
+	  instead of just bt2020
+	  
+2017-06-10 - ffxvid 1.1.5
+	* Replace numbers in array variable char of the video_chars_func()
+	  function with the ones from the for loop
+	* Pipe the ffprobe string to tail -1 to work around issues
+	  with some problematic files
+	* Some small improvements to the video_colorspace_func() function
+	  
+2017-06-09 - ffxvid 1.1.4
+	* New function, video_chars_func(), to detect and display video
+	  characteristics like color range/space/transfer/primaries
+	* Detect and display video resolution if video scaling is enabled
+	* Detect and display pixel format
+	
+2017-06-08 - ffxvid 1.1.3
+	* Report software scaler set in the config file
+	* Merge the bicubic and spline scaler tuning code
+	* Mention for the Lanczos scaler that the scaler
+	  tuning value is the filter length and not sharpness
+
+2017-06-05 - ffxvid 1.1.2
+	* Remove redundant software scaler warning and exit in
+	  the sws_func() function for the config file
+	* Added support for the experimental software scaler
+	* Added support for software scaler tuning where applicable
+	* Removed additional encoder info on max audio channels support
+	  
+2017-06-04 - ffxvid 1.1.1
+	* Match software scaler options in config file with the
+	  ones inside the script. $SCALER in config file now
+	  takes a value between 0 and 9
+	* Do some basic checking of scaler option when it's set
+	  in the config file
+	  
+2017-06-01 - ffxvid 1.1.0
+	* Simplify the scale variable a bit
+	* Support SMPTE170M colorspace conversion
+	
+2017-05-16 - ffxvid 1.0.9
+	* Added support for FFmpeg's internal Opus audio encoder
+	
+2017-05-14 - ffxvid 1.0.8
+	* Bugfix in the software scale code. Use an if conditional
+	  to check for an y/n answer
+	  
+2017-05-13 - ffxvid 1.0.7
+	* Support accurate rounding for the software scalers
+	* Support full chroma interpolation for the software scalers
+	* Use the flags option of the scale option instead of -sws_flags
+	  to set scaler and its options
+	* Bugfix: software scaler code missing
+	
+2017-04-03 - ffxvid 1.0.6
+	* Support setting the input/output color range
+	
+2017-03-18 - ffxvid 1.0.5
+	* Update audio compression level values
+	* Update colorspace entry for NTSC video
+	* Fixed bug in the video_colorspace_func() values
+	
+2017-02-22 - ffxvid 1.0.4
+	* Support high FPS -> low FPS conversions
+	* Bugfix: missing options in FPS conversion menu
+	
+2017-02-19 - ffxvid 1.0.3
+	* Enable Variance AQ by default
+	* Correct a few things in man page
+	* Update the preset.txt file
+	
+2017-02-18 - ffxvid 1.0.2
+	* Switch to using libxvid instead of mpeg4 encoder
+	* Set appropriate threads amount for encoding
+	* Update default encoding options
+	
+2017-02-17 - ffxvid 1.0.1
+	* Update default encoding options
+
+2017-02-17 - ffxvid 1.0.0
+	* Initial public release

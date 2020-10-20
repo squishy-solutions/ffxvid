@@ -1,0 +1,84 @@
+.\"                                      Hey, EMACS: -*- nroff -*-
+.\" add new suboption
+.de IPs
+.IP "\\$1"
+..
+.TH ffxvid 1 "Oct 24, 2019"
+.SH NAME
+ffxvid
+
+.SH SYNOPSIS
+.B ffxvid
+[\-m <mode>] [\-b|\-v|\-e|\-r|\-h] [\-c <preset/config file>]
+.br
+
+.SH DESCRIPTION
+\fBffxvid\fR is a small yet quite capable shell script for encoding to the MPEG4 Part 2/Xvid video
+format using the FFmpeg encoder and libxvid library. \fBffxvid\fR supports a wide range
+of options for video encoding coupled with support for encoding multiple audio tracks
+and copying multiple subtitles. \fBffxvid\fR only supports as input video files so it is
+not possible to encode directly from a DVD/BD drive or an ISO image.
+.LP
+The script uses a configuration file stored in $HOME/.ffxvid where the user can set things up.
+\fBffxvid\fR is interactive in nature but the user can pass through it in under a few minutes.
+
+.SH REQUIREMENTS
+- FFmpeg with libxvid support
+.br
+- FFprobe (part of FFmpeg)
+.br
+- MPlayer (for crop preview only)
+.br
+- MP4Box from GPAC (for mp4/m4v/mov cover art only)
+.br
+- bc
+
+.SH PARAMETERS
+.TP
+.B -m <mode>
+Specify a pass mode. If this option is not used, the script defaults to cq mode.
+Valid pass modes are:
+.RS
+.IPs
+.B 1p (1-pass mode)
+.br
+.B 2p (2-pass mode)
+.br
+.B cq (constant quantizer mode)
+.RE
+.
+.TP
+.B -b
+Activate batch encoding mode. This mode is used to encode directories
+with video files in them.
+.TP
+.B -c /path/to/file/preset.txt
+Load a custom preset file. The package includes an example preset file.
+This option can also be used to load a custom configuration file instead
+of a preset.
+.
+.TP
+.B -e
+Edit the configuration file.
+.TP
+.B -r
+Reset the configuration file to its defaults.
+.TP
+.B -v
+Display version and exit.
+.TP
+.B -h
+Display internal help menu and exit.
+
+.SH SEE ALSO
+.B ffmpeg (1)
+
+.SH AUTHORS
+.B ffxvid
+was written by Grozdan Nikolov <neutrino8@gmail.com>
+
+.SH BUG REPORTS
+Please send all bug reports and/or questions/suggestions/donations to <neutrino8@gmail.com>
+
+.SH WWW
+https://ffxvid.teambelgium.net

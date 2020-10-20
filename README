@@ -1,0 +1,18 @@
+ffxvid is a small shell script for encoding to MPEG4 Part 2/Xvid video
+using the ffmpeg encoder.
+
+Features:
+
+An up-to-date list of the supported features is available on the
+website of ffxvid
+
+https://ffxvid.teambelgium.net
+
+Parameters:
+
+Run 'ffxvid -h' in a console to see a list of supported parameters
+or read the man page (man ffxvid).
+
+Donations:
+
+PayPal address: neutrino8@gmail.com

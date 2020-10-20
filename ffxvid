@@ -1,0 +1,3523 @@
+#!/usr/bin/env bash
+#
+# Small script to encode to Xvid video using FFmpeg.
+# Author: Grozdan "microchip" Nikolov <neutrino8@opensuse.org>
+# Version: 1.6.9
+# Date: 2020-06-21
+#
+# ffx264 is free software ; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation ; either version 2 of the License, or
+# (at your option) any later version.
+#
+# ffx264 is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY ; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program ; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+# MA 02110-1301 USA
+
+green() { echo -e "\e[1;32m$1\e[0;39;49m"; }
+brown() { echo -e "\e[0;33m$1\e[0;39;49m"; }
+error() { echo -e "\e[1;31m$1\e[0;39;49m"; }
+
+version="1.6.9"
+
+CFG="$HOME/.ffxvid"
+cfgversion="15"
+
+genconfig_func() {
+cat<<EOF>>"$CFG"
+################# Config for ffxvid #################
+
+# Version: $cfgversion - do not modify this line!
+
+# Editor used for the -e option
+EDITOR="vi"
+
+# Output directory
+# Can be overwritten at exec
+# time if a path is provided
+OUTDIR="$HOME"
+
+# Container format extension
+# Leave empty to ask each time
+# Supported are:
+# avi/mkv/mp4/m4v/mov/wmv
+CONFMT=""
+
+# Scan for multiple video tracks?
+SCAN_MULTI_VID_TRACKS="y"
+
+# Nice value (0-19)
+NICE="19"
+
+# Constant Quantizer value
+# Leave empty to ask each time
+CQ="2"
+
+# Automatically crop the input?
+AUTOCROP="y"
+
+# Enable software scaling support?
+SCALE="y"
+
+# Leave empty to ask each time or
+# set a default software scaler
+#
+# 0 = fast bilinear
+# 1 = bilinear
+# 2 = bicubic
+# 3 = nearest neighbor
+# 4 = area averaging
+# 5 = luma bicubic/chroma bilinear
+# 6 = gaussian
+# 7 = sinc
+# 8 = lanczos
+# 9 = natural bicubic spline
+# 10 = experimental
+#
+SCALER=""
+
+# Video filters
+VID_DENOISE="y"
+VID_NOISE="y"
+VID_DEBLOCK="y"
+VID_SHARPEN="y"
+VID_ROTATE="y"
+VID_DEINTERLACE="y"
+VID_DETELECINE="y"
+VID_HDR_TO_SDR="y"
+VID_PIXEL_FORMAT="y"
+VID_COLORSPACE="y"
+VID_FPS_CONVERT="y"
+
+# Audio filters
+AUD_NORMALIZE="y"
+AUD_VOLUME="y"
+AUD_RESAMPLE="y"
+
+# Set a default audio codec
+# Leave empty to ask each time
+DEFAULT_AUD_CODEC=""
+
+# Enable subtitles support?
+# Note: not all containers support
+# all types of subs!
+SUBS="y"
+
+# Copy original metadata from input?
+METADATA="n"
+
+# Copy chapters from input?
+CHAPS="y"
+
+# Enable verbose logging to a file?
+LOG="n"
+
+# FFmpeg Xvid params.
+XVIDPARAMS="-flags +mv4+aic+cgop -bf 1 -me_quality 6 -mbd 2 -trellis 1 -variance_aq 1"
+
+# Leave empty to auto-detect ffmpeg/ffprobe/mplayer
+# or set your custom ones (eg, /path/to/bin/ffmpeg)
+FFMPEG=""
+FFPROBE=""
+MPLAYER=""
+MP4BOX=""
+
+# Add a custom comment to your encodes
+# Leave empty to disable/ask each time
+COMMENT="Encoded with the help of \$(basename \$0) \$version"
+
+#####################################################
+EOF
+}
+
+while getopts ":v :b :e :r :h :m: :c:" opt; do
+	case "$opt" in
+		v)
+		echo "$version"
+		exit 0
+		;;
+		m)
+		case "$OPTARG" in
+			[1-2]p|cq) true ;;
+			*)
+			error "-> Invalid mode!"
+			error "-> Use: $(basename $0) -h"
+			exit 1
+			;;
+		esac
+		encmode="$OPTARG"
+		;;
+		b)
+		batchmode="1"
+		;;
+		c)
+		if [ ! -f "$OPTARG" ]; then
+			error "-> No such file!"
+			exit 1
+		fi
+		PRESETFILE="$OPTARG"
+		;;
+		e)
+		test ! -f "$CFG" && genconfig_func
+		source "$CFG"
+		$EDITOR "$CFG"
+		exit 0
+		;;
+		r)
+		rm -f "$CFG"
+		genconfig_func
+		green "-> Configuration file has been reset!"
+		exit 0
+		;;
+		h)
+		echo
+		brown " -m <mode>"
+		echo "      Specify a pass mode. If this option is not used, the script"
+		echo "      defaults to cq mode. Valid pass modes are:"
+		echo "          1p  (1-pass mode)"
+		echo "          2p  (2-pass mode)"
+		echo "          cq (constant quantizer mode)"
+		echo
+		brown " -b"
+		echo "      Activate batch encoding mode. This mode is used to encode"
+		echo "      directories with video files in them."
+		echo
+		brown " -c /path/to/file/preset.txt"
+		echo "      Load a custom preset file. An example 'preset.txt' file"
+		echo "      is included with the ffxvid package. This option can also"
+		echo "      be used to load a custom configuration file instead of a"
+		echo "      preset."
+		echo
+		brown " -e"
+		echo "      Edit the configuration file."
+		echo
+		brown " -r"
+		echo "      Reset the configuration file to its defaults."
+		echo
+		brown " -v"
+		echo "      Display version and exit."
+		echo
+		brown " -h"
+		echo "      Display this help and exit."
+		echo
+		exit 0
+		;;
+		\?)
+		error "-> Invalid option!"
+		error "-> Use: $(basename $0) -h"
+		exit 1
+		;;
+		:)
+		error "-> Option -$OPTARG requires an argument!"
+		error "-> Use: $(basename $0) -h"
+		exit 1
+		;;
+	esac
+done
+
+if [ -r /proc/cpuinfo ]; then
+	THREADS=$(sed -n -e '/^processor/p' /proc/cpuinfo | wc -l)
+	if [ ! -z "$THREADS" ]; then
+		threads="-threads $THREADS"
+	fi
+fi
+
+brown "  __  __             _     _" 
+brown " / _|/ _|_  ____   _(_) __| |"
+brown "| |_| |_\ \/ /\ \ / / |/ _  |"
+brown "|  _|  _|>  <  \ V /| | (_| |"
+brown "|_| |_| /_/\_\  \_/ |_|\__,_|"
+brown "v$version by microchip"
+echo
+
+if [ -f "$CFG" ]; then
+	cver=$(grep '^# Version' "$CFG" | awk '{print $3}')
+	if [ "$cver" != "$cfgversion" ]; then
+		mv -f "$CFG" "$CFG.old"
+		genconfig_func
+		error "Important notice! The configuration file of $(basename $0) located in"
+		error "'$CFG' has been updated to the latest version!"
+		echo
+		error "If you have made any prior changes to the configuration file,"
+		error "please commit those changes again and restart $(basename $0)!"
+		error "If no changes were made, just restart $(basename $0) to get rid of"
+		error "this notice."
+		echo
+		exit 0
+	else
+		source "$CFG"
+	fi
+else
+	genconfig_func
+	green "-> Config file generated in '$CFG'"
+	green "-> Please set things up in there, if needed"
+	echo
+	source "$CFG"
+fi
+
+if [ ! -z "$PRESETFILE" ]; then
+	if [ -z "$(grep '^XVIDPARAMS' "$PRESETFILE")" ]; then
+		error "-> The XVIDPARAMS variable is commented out or missing in your file!"
+		error "-> Please at least add to the file: XVIDPARAMS=\"-flags +mv4 -vtag xvid\" (for example)"
+		echo
+		exit 1
+	fi
+	source "$PRESETFILE"
+else
+	if [ -f "$CFG" -a -z "$(grep '^XVIDPARAMS' "$CFG")" ]; then
+		error "-> The XVIDPARAMS variable is commented out"
+		error "   or missing in '$CFG'"
+		error "-> Regenerating config file!"
+		echo
+		rm -f "$CFG"
+		genconfig_func
+	fi
+fi
+
+if [ ! -z "$FFMPEG" ]; then
+	if [ ! -x "$FFMPEG" ]; then
+		error "-> ffmpeg is missing from your system!"
+		error "-> Check the config in '$CFG'"
+		echo
+		exit 1
+	fi
+else
+	FFMPEG="$(which ffmpeg 2>/dev/null)"
+	if [ ! -x "$FFMPEG" ]; then
+		error "-> ffmpeg is missing from your system!"
+		echo
+		exit 1
+	fi
+fi
+
+if [ ! -z "$FFPROBE" ]; then
+	if [ ! -x "$FFPROBE" ]; then
+		error "-> ffprobe is missing from your system!"
+		error "-> Check the config in '$CFG'"
+		echo
+		exit 1
+	fi
+else
+	FFPROBE="$(which ffprobe 2>/dev/null)"
+	if [ ! -x "$FFPROBE" ]; then
+		error "-> ffprobe is missing from your system!"
+		echo
+		exit 1
+	fi
+fi
+
+if [ "$AUTOCROP" = "y" ]; then
+	if [ ! -z "$MPLAYER" ]; then
+		if [ ! -x "$MPLAYER" ]; then
+			error "-> MPlayer is missing from your system!"
+			error "-> Check the config in '$CFG'"
+			echo
+			exit 1
+		fi
+	else
+		MPLAYER="$(which mplayer 2>/dev/null)"
+		if [ ! -x "$MPLAYER" ]; then
+			error "-> MPlayer is missing from your system!"
+			echo
+			exit 1
+		fi
+	fi
+fi
+
+if [ ! -z "$MP4BOX" ]; then
+	if [ ! -x "$MP4BOX" ]; then
+		error "-> MP4Box is missing from your system!"
+		error "-> Check the config in '$CFG'"
+		echo
+		exit 1
+	fi
+else
+	MP4BOX="$(which MP4Box 2>/dev/null)"
+	if [ ! -x "$MP4BOX" ]; then
+		error "-> MP4Box is missing from your system!"
+		echo
+		exit 1
+	fi
+fi
+
+BC="$(which bc 2>/dev/null)"
+if [ ! -x "$BC" ]; then
+	error "-> Utility 'bc' is missing from your system!"
+	exit 1
+fi
+
+if [ -z "$OUTDIR" ]; then
+	error "-> OUTDIR is not set in the config file!"
+	error "-> Check your config in '$CFG'"
+	echo
+	exit 1
+else
+	if [ ! -d "$OUTDIR" ]; then
+		mkdir -p "$OUTDIR" 2>/dev/null
+		if [ $? != 0 ]; then
+			error "-> Could not create the output directory!"
+			error "-> Check your config in '$CFG'"
+			echo
+			exit 1
+		fi
+	fi
+fi
+
+# Called twice. Here, to check what is set in
+# the config file, and when setting the
+# container format at runtime
+check_container_func() {
+	CONFMT="$(echo "$CONFMT" | tr '[:upper:]' '[:lower:]')"
+	if [ ! -z "$CONFMT" ]; then
+		case "$CONFMT" in
+			mp4|m4v|mov)	movflags="-movflags +faststart+frag_keyframe+use_metadata_tags" ;;
+			avi|mkv|wmv)	true ;;
+			*)
+			error "-> Xvid video not supported by the chosen container!"
+			error "-> Supported containers are: avi, wmv, mp4, m4v, mov, mkv"
+			error "-> Check your config file, if needed, in '$CFG'"
+			exit 1
+			;;
+		esac
+	fi
+}
+
+check_container_func
+
+if [ ! -z "$batchmode" ]; then
+	error "-> Note: batch mode is in effect!"
+	error "-> Be careful which settings you use as they will"
+	error "   apply to all files and may cause problems!"
+	echo
+	printf "Specify a File from the Directory to Encode from: "
+	read -e input
+else
+	printf "Specify the Input File: "
+	read -e input
+fi
+
+if [ ! -f "$input" ]; then
+	error "-> No such file!"
+	exit 1
+fi
+
+if [ -z "$batchmode" ]; then
+	input="$(readlink -e "$input")"
+fi
+
+if [ "$SCAN_MULTI_VID_TRACKS" = "y" ]; then
+	printf "Scan for Multiple Video Tracks? [y/N]: "
+	read mvt
+	if [ "$mvt" = "y" -o "$mvt" = "Y" ]; then
+		echo
+		green "-> Scanning for video tracks..."
+		sleep 1
+		VIDTRACKS="$($FFPROBE -i "$input" 2>&1 | grep 'Stream #' | grep 'Video' | sed 's|    ||g')"
+		if [ ! -z "$VIDTRACKS" ]; then
+			VIDTRKS="$(echo "$VIDTRACKS" | wc -l)"
+			echo
+			green "$VIDTRACKS"
+			echo
+			green "-> Found $VIDTRKS video tracks"
+		else
+			error "-> Could not find any video tracks!"
+		fi
+		echo
+		printf "Specify the Video Track to Encode [default is 0:0]: "
+		read vte
+		test -z "$vte" && vidmap="-map 0:0" || vidmap="-map $vte"
+	else
+		vidmap="-map 0:0"
+	fi
+else
+	vidmap="-map 0:0"
+fi
+
+vidtrack="$(echo "$vidmap" | awk '{print $2}' | awk -F: '{print $2}')"
+
+if [ ! -z "$batchmode" ]; then
+	OUTPUT="$OUTDIR/$(basename $0)_$$"
+	printf "Specify the Output Directory [default is $OUTPUT]: "
+	read -e output
+	if [ -z "$output" ]; then
+		mkdir -p "$OUTPUT" 2>/dev/null
+		if [ $? != 0 ]; then
+			error "-> Could not create the output directory!"
+			exit 1
+		fi
+		OUTPUT="$(realpath -s "$OUTPUT/\${i%.*}")"
+	else
+		mkdir -p "$output" 2>/dev/null
+		if [ $? != 0 ]; then
+			error "-> Could not create the output directory!"
+			exit 1
+		fi
+		OUTPUT="$(realpath -s "$output/\${i%.*}")"
+	fi
+else
+	printf "Specify a Name for the Output: "
+	read -e output
+	if [ -z "$output" ]; then
+		error "-> You have to provide a name for the output!"
+		exit 1
+	fi
+	if [ ! -z "$(echo "$output" | grep '/')" ]; then
+		mkdir -p "$(dirname "$output")" 2>/dev/null
+		if [ $? != 0 ]; then
+			error "-> Could not create the output directory!"
+			exit 1
+		fi
+		OUTPUT="$(readlink -m "$output")"
+	else
+		OUTPUT="$(readlink -m "$OUTDIR/$output")"
+	fi
+fi
+
+# Check if output dir is writable
+WRITE="$(dirname "$OUTPUT")/.$(basename $0)_writable$$"
+touch "$WRITE" 2>/dev/null
+if [ $? != 0 ]; then
+	error "-> Specified output directory is not writable by user '$(id -un)'"
+	exit 1
+else
+	rm -f "$WRITE"
+fi
+	
+if [ -z "$CONFMT" ]; then
+	printf "Which Container Format to Use? [avi/mkv/mp4/m4v/mov/wmv - default is avi]: "
+	read confmt
+	test -z "$confmt" && CONFMT="avi" || CONFMT="$confmt"
+fi
+
+check_container_func
+
+OUTPUT="$OUTPUT.$CONFMT"
+
+if [ "$LOG" = "y" ]; then
+	if [ -z "$batchmode" ]; then
+		export FFREPORT="level=40:file=$(echo "${OUTPUT%.*}_verbose$$.log" | sed 's| |_|g')"
+	else
+		verbose_func() {
+			echo "export FFREPORT=\"level=40:file=\$(echo \"$(dirname "$OUTPUT")/\${i%.*}_verbose$$.log\" | sed 's| |_|g')\""
+		}
+	fi
+	verbose="-v verbose"
+fi
+
+if [ ! -z "$batchmode" ]; then
+	if [ "$(realpath -s "$(dirname "$input")")" = "$(realpath -s "$(dirname "$OUTPUT")")" ]; then
+		error "-> Input directory matches output directory!"
+		exit 1
+	fi
+else
+	if [ "$(realpath -s "$input")" = "$(realpath -s "$OUTPUT")" ]; then
+		error "-> Input file matches output file!"
+		exit 1
+	fi
+fi
+
+if [ -z "$batchmode" ]; then
+	if [ -e "$OUTPUT" ]; then
+		echo
+		error "-> Renaming existing file to '$OUTPUT.$$.old'"
+		echo
+		mv -f "$OUTPUT" "$OUTPUT.$$.old"
+	fi
+else
+	CHDIR="cd \"$(realpath -s "$(dirname "$input")")\""
+	FORLOOP_START="for i in *; do"
+	CHKFILE_START="if [ -f \"\$i\" ]; then"
+	CHKFILE_END="fi"
+	FORLOOP_END="done"
+fi
+
+METATITLE="-metadata title=\"$(basename "${OUTPUT%.*}")\" -metadata:s:v:0 title=\"$(basename "${OUTPUT%.*}")\""
+
+printf "Output to Additional Container Formats? [y/N]: "
+read acf
+if [ "$acf" = "y" -o "$acf" = "Y" ]; then
+	printf "Specify the Container Formats [example: mov,mkv - press 'Enter' to skip]: "
+	read rcon
+	test ! -z "$rcon" && remuxcon="$(echo "$rcon" | tr '[:upper:]' '[:lower:]' | tr '[:punct:]' ' ')"
+	if [ ! -z "$remuxcon" ]; then
+		container_func() {
+			case "$1" in
+				avi|mp4|m4v|mov|wmv)
+				green "-> Note: additional container $i supports the following audio codecs:"
+				;;
+			esac
+			case "$1" in
+				mp4)		green "-> ac3|eac3|truehd|dts|aac|fdk-aac|mp3|vorbis|flac|copy" ;;
+				m4v)		green "-> ac3|aac|fdk-aac|alac|copy" ;;
+				mov) 		green "-> ac3|eac3|dts|aac|fdk-aac|mp3|vorbis|alac|copy" ;;
+				avi)		green "-> ac3|dts|aac|fdk-aac|mp3|vorbis|wmav1|wmav2|pcm|flac|copy" ;;
+				wmv)		green "-> ac3|eac3|dts|aac|fdk-aac|mp3|vorbis|wmav1|wmav2|flac|copy" ;;
+				other)
+				error "-> Xvid video not supported by the $i container!"
+				error "-> Supported containers are: avi, mp4, m4v, mov, mkv, wmv"
+				echo
+				exit 1
+				;;
+			esac
+		}
+		
+		DUPS="$(echo -e "$remuxcon" | sed 's| |\n|g' | sort | uniq -d)"
+		if [ ! -z "$DUPS" ]; then
+			error "-> You provided a duplicate container entry!"
+			exit 1
+		fi
+		
+		for i in $remuxcon; do
+			echo
+			if [ "$i" = "$CONFMT" ]; then
+				error "-> Additional container $i matches the main output container!"
+				echo
+				exit 1
+			fi
+			case "$i" in
+				mkv)
+				green "-> Note: additional container $i supports all the audio codecs"
+				;;
+				mp4)	container_func mp4 ;;
+				m4v)	container_func m4v ;;
+				mov)	container_func mov ;;
+				avi)	container_func avi ;;
+				wmv)	container_func wmv ;;
+				*)	container_func other ;;
+			esac
+		done
+		echo
+	fi
+fi
+
+printf "Specify a Genre for the Content [press 'Enter' to skip]: "
+read genre
+test ! -z "$genre" && METAGENRE="-metadata genre=\"$genre\""
+
+printf "Specify the Year of the Content [press 'Enter' to skip]: "
+read year
+test ! -z "$year" && METAYEAR="-metadata year=\"$year\""
+
+if [ -z "$COMMENT" ]; then
+	printf "Specify a Comment [press 'Enter' to skip]: "
+	read comment
+	test ! -z "$comment" && COMMENT="$comment"
+fi
+
+case "$CONFMT" in
+	mkv|mp4|m4v|mov)
+	printf "Specify the Director of the Content [press 'Enter' to skip]: "
+	read director
+	test ! -z "$director" && METADIRECTOR="-metadata director=\"$director\""
+	printf "Specify the Cast of the Content [press 'Enter' to skip]: "
+	read cast
+	test ! -z "$cast" && METACAST="-metadata cast=\"$cast\""
+	
+	printf "Specify a Cover Image in JPG/PNG format [press 'Enter' to skip]: "
+	read -e cover
+	if [ ! -z "$cover" ]; then
+		if [ ! -f "$cover" ]; then
+			error "-> No such file: $cover"
+			exit 1
+		else
+			case "$(basename "${cover##*.}" | tr '[:upper:]' '[:lower:]')" in
+				jpeg|jpg)	img="jpeg" ;;
+				png)		img="png" ;;
+				*)
+				error "-> Image format not supported!"
+				exit 1
+				;;
+			esac
+			case "$CONFMT" in
+				mkv)		MKVCOVER="-attach \"$(readlink -e "$cover")\" -metadata:s:t mimetype=\"image/$img\"" ;;
+				mp4|m4v|mov)	MP4COVER="1" ;;
+			esac
+		fi
+	fi
+	;;
+esac
+
+case "$encmode" in
+	[1-2]p)
+	printf "Specify the desired Video Bitrate in kbps [default is 8000]: "
+	read vbtr
+	test -z "$vbtr" && vbitrate="8000k" || vbitrate="${vbtr}k"
+	;;
+	""|cq)
+	if [ -z "$CQ" ]; then
+		printf "Specify a CQ Value for the Encoding [0-31 - default is 2]: "
+		read cq
+		test -z "$cq" && CQ="2" || CQ="$cq"
+	fi
+	;;
+esac
+
+printf "Set the VBV Maxrate/Buffer Size? [y/N]: "
+read vbv
+if [ "$vbv" = "y" -o "$vbv" = "Y" ]; then
+	printf "Specify the VBV Maxrate in kbps [default is 5000]: "
+	read vbv_max
+	test -z "$vbv_max" && ffvbv_maxrate="-maxrate 5000k" || ffvbv_maxrate="-maxrate ${vbv_max}k"
+	printf "Specify the VBV Buffer Size in kbps [default is 6000]: "
+	read vbv_buf
+	test -z "$vbv_buf" && ffvbv_bufsize="-bufsize 6000k" || ffvbv_bufsize="-bufsize ${vbv_buf}k"
+fi
+
+video_denoise_func() {
+	printf "Denoise the Input File? [y/N]: "
+	read dn
+	if [ "$dn" = "y" -o "$dn" = "Y" ]; then
+		echo
+		brown " Video Denoisers"
+		brown " ~~~~~~~~~~~~~~~"
+		echo " 0 -> hqdn3d        (3D spatial & temporal denoiser)"
+		echo " 1 -> vaguedenoiser (spatial wavelet denoiser)"
+		echo " 2 -> atadenoise    (adaptive temporal denoiser)"
+		echo " 3 -> bm3d          (block-matching 3D denoiser)"
+		echo " 4 -> fftdnoiz      (FFT denoiser)"
+		echo
+		printf "Which Denoiser to use? [default is 0]: "
+		read dnopt
+		case "$dnopt" in
+			0|"")
+			printf "Specify the hqdn3d denoise values [default is 3:2:4]: "
+			read dvalues
+			test -z "$dvalues" && dv="3:2:4" || dv="$dvalues"
+			denoise="hqdn3d=$dv,"
+			;;
+			1)
+			printf "Specify the vaguedenoiser strength [0.0-5.0 - default is 0.8]: "
+			read dvalues
+			test -z "$dvalues" && dv="0.8" || dv="$dvalues"
+			denoise="vaguedenoiser=threshold=$dv:method=soft:nsteps=4,"
+			;;
+			2)
+			printf "Specify Threshold A and B for 1st plane [0-0.3:0-5 - default is 0.08:0.1]: "
+			read t_1
+			test -z "$t_1" && ata_1="0a=0.08:0b=0.1:" || ata_1="0a=$(echo "$t_1" | awk -F: '{print $1}'):0b=$(echo "$t_1" | awk -F: '{print $2}'):"
+			printf "Specify Threshold A and B for 2nd plane [0-0.3:0-5 - default is 0.08:0.1]: "
+			read t_2
+			test -z "$t_2" && ata_2="1a=0.08:1b=0.1:" || ata_2="1a=$(echo "$t_2" | awk -F: '{print $1}'):1b=$(echo "$t_2" | awk -F: '{print $2}'):"
+			printf "Specify Threshold A and B for 3rd plane [0-0.3:0-5 - default is 0.08:0.1]: "
+			read t_3
+			test -z "$t_3" && ata_3="2a=0.08:2b=0.1" || ata_3="2a=$(echo "$t_3" | awk -F: '{print $1}'):2b=$(echo "$t_3" | awk -F: '{print $2}')"
+			denoise="atadenoise=$ata_1$ata_2$ata_3,"
+			;;
+			3)
+			printf "Specify the Denoise Strength [0-999.9 - default is 3.5]: "
+			read ds
+			test -z "$ds" && sigma="3.5" || sigma="$ds"
+			printf "Specify the Local Patch Size [4-6 - default is 4]: "
+			read lps
+			test -z "$lps" && block="4" || block="$lps"
+			printf "Specify the Sliding Step for Processing Blocks [1-64 - default is 2]: "
+			read sspb
+			test -z "$sspb" && bstep="2" || bstep="$sspb"
+			printf "Filter only the Luma planes? [y/N]: "
+			read fluma
+			if [ "$fluma" = "y" -o "$fluma" = "Y" ]; then
+				planes=":planes=1"
+			fi
+			denoise="bm3d=sigma=$sigma:block=$block:bstep=$bstep$planes,"
+			;;
+			4)
+			printf "Specify the Denoise Strength [0-30 - default is 4]: "
+			read ds
+			test -z "$ds" && sigma="4" || sigma="$ds"
+			printf "Specify the Block Overlap [0.2-0.8 - default is 0.5]: "
+			read bo
+			test -z "$bo" && overlap="0.5" || overlap="$bo"
+			denoise="fftdnoiz=sigma=$sigma:overlap=$overlap,"
+			;;
+			*)
+			error "-> Invalid option!"
+			exit 1
+			;;
+		esac
+	fi
+}
+
+video_noise_func() {
+	printf "Add Temporal & Uniform Noise to the Input File? [y/N]: "
+	read tun
+	if [ "$tun" =  "y" -o "$tun" = "Y" ]; then
+		printf "Specify the Noise Strength [0-100 - default is 2]: "
+		read nvalue
+		test -z "$nvalue" && nval="2" || nval="$nvalue"
+		noise="noise=alls=$nvalue:allf=t+u,"
+	fi
+}
+
+video_deblock_func() {
+	printf "Deblock the Input File? [y/N]: "
+	read db
+	if [ "$db" = "y" -o "$db" = "Y" ]; then
+		echo
+		brown " Deblock Filters"
+		brown " ~~~~~~~~~~~~~~~"
+		echo " 0 -> spp"
+		echo " 1 -> fspp"
+		echo " 2 -> uspp"
+		echo " 3 -> pp7"
+		echo " 4 -> deblock"
+		echo
+		printf "Specify the Deblock Filter [default is 4]: "
+		read dbopt
+		case "$dbopt" in
+			0)
+			printf "Specify the Deblock Parameters [quality(0-6):qp - default is 3:11]: "
+			read dp
+			test -z "$dp" && dparam="3:11" || dparam="$dp"
+			deblock="spp=quality=$(echo "$dparam" | awk -F: '{print $1}'):qp=$(echo "$dparam" | awk -F: '{print $2}'),"
+			;;
+			1)
+			printf "Specify the Deblock Parameters [strength(-15-32):qp - default is 6:11]: "
+			read dp
+			test -z "$dp" && dparam="6:11" || dparam="$dp"
+			deblock="fspp=strength=$(echo "$dparam" | awk -F: '{print $1}'):qp=$(echo "$dparam" | awk -F: '{print $2}'),"
+			;;
+			2)
+			printf "Specify the Deblock Parameters [quality(0-8):qp - default is 3:11]: "
+			read dp
+			test -z "$dp" && dparam="3:11" || dparam="$dp"
+			deblock="uspp=quality=$(echo "$dparam" | awk -F: '{print $1}'):qp=$(echo "$dparam" | awk -F: '{print $2}'),"
+			;;
+			3)
+			printf "Specify the Deblock Quantization Parameter [default is 11]: "
+			read dp
+			test -z "$dp" && dparam="11" || dparam="$dp"
+			deblock="pp7=qp=$dparam,"
+			;;
+			4|"")
+			printf "Specify the Deblock Filter Type [weak/strong - default is strong]: "
+			read dft
+			test -z "$dft" && dbtype="strong" || dbtype="$dft"
+			printf "Specify the Pixel Block Size [4-512 - default is 8]: "
+			read pbs
+			test -z "$pbs" && pixsize="8" || pixsize="$pbs"
+			deblock="deblock=filter=$dbtype:block=$pixsize,"
+			;;
+			*)
+			error "-> Invalid option!"
+			exit 1
+			;;
+		esac
+	fi
+}
+
+video_sharpen_func() {
+	printf "Sharpen or Blur the Encode? [y/N]: "
+	read sharp
+	if [ "$sharp" = "y" -o "$sharp" = "Y" ]; then
+		printf "Set the Luma Matrix Horizontal/Vertical sizes [odd num between 3-23 - default is 5:5]: "
+		read lmhv
+		if [ ! -z "$lmhv" ]; then
+			if [ -z "$(echo "$lmhv" | grep ':')" ]; then
+				echo
+				error "-> You have to specify both values! (eg, 5:5)"
+				error "-> Using default of 5:5"
+				echo
+				lx="5"
+				ly="5"
+			else
+				lx="$(echo "$lmhv" | awk -F: '{print $1}')"
+				ly="$(echo "$lmhv" | awk -F: '{print $2}')"
+			fi
+		else
+			lx="5"
+			ly="5"
+		fi
+		printf "Set the Luma Effect Strength [-1.5-1.5 - default is 0.5]: "
+		read les
+		test -z "$les" && la="0.5" || la="$les"
+		printf "Set the Chroma Matrix Horizontal/Vertical sizes [odd num between 3-23 - default is 5:5]: "
+		read cmhv
+		if [ ! -z "$cmhv" ]; then
+			if [ -z "$(echo "$cmhv" | grep ':')" ]; then
+				echo
+				error "-> You have to specify both values! (eg, 5:5)"
+				error "-> Using default of 5:5"
+				echo
+				cx="5"
+				cy="5"
+			else
+				cx="$(echo "$cmhv" | awk -F: '{print $1}')"
+				cy="$(echo "$cmhv" | awk -F: '{print $2}')"
+			fi
+		else
+			cx="5"
+			cy="5"
+		fi
+		printf "Set the Chroma Effect Strength [-1.5-1.5 - default is 0.0]: "
+		read ces
+		test -z "$ces" && ca="0.0" || ca="$ces"
+		unsharp="unsharp=lx=$lx:ly=$ly:la=$la:cx=$cx:cy=$cy:ca=$ca,"
+	fi
+}
+
+# Used by mc/bobbing deinterlace and FPS conversion
+video_fps_func() {
+	GETFPS="$($FFPROBE -i "$input" -v quiet -select_streams v:$vidtrack -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+}
+
+# Used by mc/bobbing deinterlace, IVTC and interlace-aware encoding
+video_field_parity_func() {
+	echo
+	green "-> Detecting Field Parity..."
+	sleep 1
+	FPAR="$($FFPROBE -i "$input" -v quiet -select_streams v:$vidtrack -show_entries stream=field_order -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+	case "$FPAR" in
+		t*|T*)	fp="tff"; fparity="Top Field First (TFF)" ;;
+		b*|B*)	fp="bff"; fparity="Bottom Field First (BFF)" ;;
+		p*|P*)	fp="progressive"; fparity="Progressive" ;;
+		""|*)	fp="???"; fparity="???" ;;
+	esac
+	green "-> Detected $fparity Parity"
+	if [ "$fp" = "progressive" ]; then
+		error "-> The video stream appears to be progressive"
+		error "   but this may be a misdetection!"
+	elif [ "$fp" = "???" ]; then
+		error "-> Could not detect the Field Parity!"
+	fi
+	echo
+	case "$fp" in
+		bff)	defpar="bff" ;;
+		*)	defpar="tff" ;;
+	esac
+}
+
+video_deinterlace_func() {
+	printf "Deinterlace the Input File? [y/N]: "
+	read deint
+	if [ "$deint" = "y" -o "$deint" = "Y" ]; then
+		video_deint_func() {
+			printf "Use Motion-Compensation Deinterlacing? [y/N]: "
+			read mcd
+			if [ "$mcd" = "y" -o "$mcd" = "Y" ]; then
+				video_field_parity_func
+				printf "Specify the Field Parity of the Input File [tff/bff - default is $defpar]: "
+				read par
+				test -z "$par" && fpar="$defpar" || fpar="$par"
+			fi
+			case "$1" in
+				ofps)	test ! -z "$fpar" && deinterlace="yadif=1,mcdeint=mode=medium:parity=$fpar:qp=10,framestep=step=2," || deinterlace="yadif=0," ;;
+				bob)	test ! -z "$fpar" && deinterlace="yadif=1,mcdeint=mode=medium:parity=$fpar:qp=10," || deinterlace="yadif=1," ;;
+			esac
+		}
+		echo
+		brown " Deinterlace Methods"
+		brown " ~~~~~~~~~~~~~~~~~~~"
+		echo " 0 -> Deinterlace at original FPS"
+		echo " 1 -> Bobbing (deinterlace at double FPS)"
+		echo
+		printf "Specify the Deinterlace Method [default is 0]: "
+		read dmethod
+		case "$dmethod" in
+			0|"")	video_deint_func ofps ;;
+			1)
+			echo
+			green "-> Detecting FPS value..."
+			sleep 1
+			video_fps_func
+			if [ ! -z "$GETFPS" ]; then
+				FPS1="$(echo "$GETFPS" | awk -F/ '{print $1}')"
+				FPS2="$(echo "$GETFPS" | awk -F/ '{print $2}')"
+				OFPS="$(($FPS1*2))/$FPS2"
+				green "-> Detected $(echo "scale=3; $GETFPS" | $BC -l) FPS"
+				green "-> Setting output FPS to: $(echo "scale=3; $OFPS" | $BC -l)"
+				ofps="-r $OFPS"
+			else
+				error "-> Could not detect the FPS value!"
+			fi
+			echo
+			video_deint_func bob
+			bob="1"
+			;;
+			*)
+			error "-> Invalid option!"
+			exit 1
+			;;
+		esac
+	fi
+}
+
+video_detelecine_func() {
+	if [ -z "$deinterlace" ]; then
+		printf "DeTelecine (IVTC) the Input File? [y/N]: "
+		read detel
+		if [ "$detel" = "y" -o "$detel" = "Y" ]; then
+			video_field_parity_func
+			printf "Specify the Field Parity of the Input File [tff/bff - default is $defpar]: "
+			read ipar
+			test -z "$ipar" && fparity="$defpar" || fparity="$ipar"
+			case "$fparity" in
+				b*|B*)	forder="bottom" ;;
+				""|*)	forder="top" ;;
+			esac
+			printf "Specify the Pulldown Pattern to Apply [default is 23]: "
+			read pdp
+			test -z "$pdp" && pulldown="23" || pulldown="$pdp"
+			detelecine="detelecine=first_field=$forder:pattern=$pulldown,"
+		fi
+	fi
+}
+
+video_rotate_func() {
+	printf "Rotate the Video? [y/N]: "
+	read rot
+	if [ "$rot" = "y" -o "$rot" = "Y" ]; then
+		echo
+		brown " Video Rotation"
+		brown " ~~~~~~~~~~~~~~"
+		echo " 0 -> 90° Counter Clockwise and Vertical Flip"
+		echo " 1 -> 90° Clockwise"
+		echo " 2 -> 90° Counter Clockwise"
+		echo " 3 -> 90° Clockwise and Vertical Flip"
+		echo " 4 -> 180°"
+		echo
+		printf "Specify the Transpose filter option [default is 0]: "
+		read transopt
+		case "$transopt" in
+			0|"")	rotate="transpose=0," ;;
+			1)	rotate="transpose=1," ;;
+			2)	rotate="transpose=2," ;;
+			3)	rotate="transpose=3," ;;
+			4)	rotate="transpose=1,transpose=1," ;;
+			*)
+			error "-> Invalid option!"
+			exit 1
+			;;
+		esac
+	fi
+}
+
+video_chars_func() {
+	case "$1" in
+		pixfmt)	green "-> Detecting Pixel Format..." ;;
+		vchars)	green "-> Detecting Video Characteristics..." ;;
+	esac
+	sleep 1
+	case "$1" in
+		pixfmt)
+		PIXFMT="$($FFPROBE -i "$input" -v quiet -select_streams v:$vidtrack -show_entries stream=pix_fmt -of default=noprint_wrappers=1:nokey=1 | tail -1 | tr '[a-z]' '[A-Z]')"
+		green "-> Detected $PIXFMT"
+		;;
+		vchars)
+		for i in {1..6}; do
+			case "$i" in
+				1)	char[i]="color_range" ;;
+				2)	char[i]="color_space" ;;
+				3)	char[i]="color_transfer" ;;
+				4)	char[i]="color_primaries" ;;
+				5)	char[i]="pix_fmt" ;;
+				6)	char[i]="bits_per_raw_sample" ;;
+			esac
+			VCHARS[i]="$($FFPROBE -i "$input" -v quiet -select_streams v:$vidtrack -show_entries stream=${char[i]} -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+		done
+		to_upper() {
+			echo "$1" | tr '[a-z]' '[A-Z]'
+		}
+		echo
+		green "-> Color Range:     $(to_upper "${VCHARS[1]}")"
+		green "-> Color Space:     $(to_upper "${VCHARS[2]}")"
+		green "-> Color Transfer:  $(to_upper "${VCHARS[3]}")"
+		green "-> Color Primaries: $(to_upper "${VCHARS[4]}")"
+		echo
+		green "-> Pixel Format:    $(to_upper "${VCHARS[5]}")"
+		green "-> Bit Depth:       $(to_upper "${VCHARS[6]}")"
+		;;
+	esac
+}
+
+video_pixfmt_func() {
+	printf "Do a Pixel Format Conversion? [y/N]: "
+	read pix
+	if [ "$pix" = "y" -o "$pix" = "Y" ]; then
+		echo
+		video_chars_func pixfmt
+		echo
+		brown " Pixel Formats"
+		brown " ~~~~~~~~~~~~~"
+		echo " 0 -> YUV420P"
+		echo " 1 -> YUV420P10 (requires 10-bits encoder)"
+		echo " 2 -> YUV422"
+		echo " 3 -> YUV422P10 (requires 10-bits encoder)"
+		echo " 4 -> YUV444P"
+		echo " 5 -> YUV444P10 (requires 10-bits encoder)"
+		echo
+		printf "Specify the Pixel Format option [default is 0]: "
+		read pixopt
+		case "$pixopt" in
+			0|"")	pixfmt="yuv420p" ;;
+			1)	pixfmt="yuv420p10le" ;;
+			2)	pixfmt="yuv422p" ;;
+			3)	pixfmt="yuv422p10le" ;;
+			4)	pixfmt="yuv444p" ;;
+			5)	pixfmt="yuv444p10le" ;;
+			*)
+			error "-> Invalid option!"
+			exit 1
+			;;
+		esac
+		pixformat="format=$pixfmt,"
+	fi
+}
+
+video_hdr_to_sdr_func() {
+	printf "Do an HDR to SDR Conversion? [y/N]: "
+	read hdr_sdr_conv
+	if [ "$hdr_sdr_conv" = "y" -o "$hdr_sdr_conv" = "Y" ]; then
+		echo
+		error "-> NOTE: This function requires that FFmpeg be compiled with"
+		error "         support for the the zimg library as it uses the"
+		error "         zscale filter!"
+		error "         https://github.com/sekrit-twc/zimg"
+		echo
+		printf "Continue? [y/N]: "
+		read hdr_sdr_cont
+		if [ "$hdr_sdr_cont" = "y" -o "$hdr_sdr_cont" = "Y" ]; then
+			echo
+			brown " Tone Mapping Algorithms"
+			brown " ~~~~~~~~~~~~~~~~~~~~~~~"
+			echo " 0 -> None"
+			echo " 1 -> Clip"
+			echo " 2 -> Linear"
+			echo " 3 -> Gamma"
+			echo " 4 -> Reinhard"
+			echo " 5 -> Hable"
+			echo " 6 -> Mobius"
+			echo
+			printf "Specify the Tone Mapping Algorithm [default is 4]: "
+			read tmaopt
+			case "$tmaopt" in
+				0)	tm_algo="none" ;;
+				1)	tm_algo="clip" ;;
+				2)	tm_algo="linear" ;;
+				3)	tm_algo="gamma" ;;
+				4)	tm_algo="reinhard" ;;
+				5)	tm_algo="hable" ;;
+				6|"")	tm_algo="mobius" ;;
+				*)
+				error "-> Invalid option!"
+				exit 1
+				;;
+			esac
+			case "$tmaopt" in
+				1)
+				printf "Specify the Linear Coefficient before Clipping [default is 1.0]: "
+				;;
+				2)
+				printf "Specify the Scale Factor to use while stretching [default is 1.0]: "
+				;;
+				3)
+				printf "Specify the Exponent of the Function [default is 1.8]: "
+				;;
+				4)
+				printf "Specify the local Contrast Coefficient at the Display Peak [default is 0.5]: "
+				;;
+				6|"")
+				printf "Specify the Transition Point from Linear to Mobius Transform [default is 0.3]: "
+				;;
+			esac
+			read tmparam
+			test ! -z "$tmparam" && tm_param=":param=$tmparam"
+			
+			printf "Specify the Tonamap Desaturation Strength [default is 2.8]: "
+			read desat
+			test -z "$desat" && tm_desat="2.8" || tm_desat="$desat"
+			echo
+			video_chars_func vchars
+			echo
+			brown " Colorspace/Transfer/Primaries Conversion"
+			brown " ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+			echo " 0 -> Copy color characteristics"
+			echo " 1 -> Convert to BT709 (HD/FHD)"
+			echo " 2 -> Convert to BT470BG (PAL)"
+			echo " 3 -> Convert to SMPTE170M (NTSC)"
+			echo
+			printf "Specify the Conversion option [default is 0]: "
+			read ctpopt
+			case "$ctpopt" in
+				0|"")
+				if [ "${VCHARS[2]}" = "unknown" -o "${VCHARS[3]}" = "unknown" -o "${VCHARS[4]}" = "unknown" ]; then
+					echo
+					error "-> One or more of the Color Characteristics values is unknown!"
+					error "-> Skipping HDR to SDR conversion!"
+					echo
+				else
+					case "${VCHARS[3]}" in
+						smpte2084|bt2020-10)	ztrans="bt2020-10"; trc="bt2020_10bit"; tc="14" ;;
+						bt2020-12)		ztrans="bt2020-12"; trc="bt2020_12bit"; tc="15" ;;
+						*)			ztrans="${VCHARS[3]}"; trc="bt2020_10bit"; tc="2" ;;
+					esac
+					printf "Use SMPTE-2084 Transfer? [y/N]: "
+					read smpte2084
+					if [ "$smpte2084" = "y" -o "$smpte2084" = "Y" ]; then
+						trc="smpte2084"
+						ztrans="smpte2084"
+						tc="16"
+					fi
+					zscale="zscale=transfer=$ztrans"
+					coloroptions="-color_primaries ${VCHARS[4]} -color_trc $trc -colorspace ${VCHARS[2]}"
+					colcopy="1"
+					case "${VCHARS[4]}" in
+						bt709)		colchar="1,1,1" ;;
+						bt470bg)	colchar="5,5,5" ;;
+						smpte170m)	colchar="6,6,6" ;;
+						bt470m)		colchar="4,4,6" ;;
+						bt2020)		colchar="9,$tc,9" ;;
+						*)		colchar="2,2,2" ;;
+					esac
+					colr=":colr=nclc,$colchar"
+				fi
+				;;
+				1)	zscale="zscale=transfer=bt709"; colorspace="colormatrix=bt2020:bt709,colorspace=all=bt709:dither=fsb"; coloroptions="-color_primaries bt709 -color_trc bt709 -colorspace bt709"; colr=":colr=nclc,1,1,1" ;;
+				2)	zscale="zscale=transfer=bt470bg"; colorspace="colormatrix=bt2020:bt470bg,colorspace=all=bt470bg:dither=fsb"; coloroptions="-color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg"; colr=":colr=nclc,5,5,5" ;;
+				3)	zscale="zscale=transfer=smpte170m"; colorspace="colormatrix=bt2020:smpte170m,colorspace=all=smpte170m:dither=fsb"; coloroptions="-color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m"; colr=":colr=nclc,6,6,6" ;;
+				*)
+				error "-> Invalid option!"
+				exit 1
+				;;
+			esac
+			if [ ! -z "$zscale" -a -z "$colcopy" ]; then
+				printf "Set the White Point Adaptation [bradford/vonkries/identity - default is bradford]: "
+				read wpa
+				test -z "$wpa" && wpadapt=":wpadapt=bradford" || wpadapt=":wpadapt=$wpa"
+				
+				printf "Apply a Color Saturation Correction? [y/N]: "
+				read satcor
+				if [ "$satcor" = "y" -o "$satcor" = "Y" ]; then
+					printf "Specify the Saturation Strength [0.0-3.0 - default is 1.0 (no change)]: "
+					read satval
+					test ! -z "$satval" && eq="eq=saturation=$satval,"
+				fi
+			fi
+			test ! -z "$zscale" && tonemap="zscale=transfer=linear,tonemap=$tm_algo$tm_param$tm_desat,$zscale,"
+			test ! -z "$colorspace" && colorspace="$colorspace$wpadapt,"
+		fi
+	fi
+}
+
+video_colorspace_func() {
+	if [ -z "$tonemap" ]; then
+		printf "Do a Colorspace/Transfer/Primaries Conversion? [y/N]: "
+		read ctp
+		if [ "$ctp" = "y" -o "$ctp" = "Y" ]; then
+			echo
+			video_chars_func vchars
+			echo
+			printf "Specify the Input/Output Color Range [tv|mpeg|pc|jpeg - default is tv:tv]: "
+			read crange
+			if [ -z "$crange" ]; then
+				irange="tv"
+				orange="tv"
+			else
+				if [ ! -z "$(echo "$crange" | grep ':')" ]; then
+					irange="$(echo "$crange" | awk -F: '{print $1}')"
+					orange="$(echo "$crange" | awk -F: '{print $2}')"
+				else
+					error "-> Invalid format! Valid is: <input_range>:<output_range> (eg: mpeg:tv)"
+					exit 1
+				fi
+			fi
+			video_csmisc_func() {
+				printf "Use 10- or 12-bits BT2020 Transfer? [default is 10]: "
+				read bdepth
+				case "$bdepth" in
+					10|"")	bd="-10"; bd2="_10bit"; trsr="14" ;;
+					12)	bd="-12"; bd2="_12bit"; trsr="15" ;;
+					*)
+					error "-> Invalid value!"
+					exit 1
+					;;
+				esac
+				printf "Use Constant or Non-Constant Matrix? [c/n - default is n]: "
+				read mtype
+				case "$mtype" in
+					n|N|"")	cm="nc"; cmatrix="9" ;;
+					c|C)	cm="c"; cmatrix="10" ;;
+					*)
+					error "-> Invalid value!"
+					exit 1
+					;;
+				esac
+			}
+			echo
+			brown " Colorspace Conversion"
+			brown " ~~~~~~~~~~~~~~~~~~~~~"
+			echo " 1 --> BT470M (NTSC) -> SMPTE170M (NTSC)"
+			echo " 2 --> BT470M (NTSC) -> BT470BG (PAL)"
+			echo " 3 --> BT470M (NTSC) -> BT709 (HD/FHD)"
+			echo " 4 --> BT470M (NTSC) -> BT2020 (4K/UHD)"
+			echo
+			echo " 5 --> SMPTE170M (NTSC) -> BT470M (NTSC)"
+			echo " 6 --> SMPTE170M (NTSC) -> BT470BG (PAL)"
+			echo " 7 --> SMPTE170M (NTSC) -> BT709 (HD/FHD)"
+			echo " 8 --> SMPTE170M (NTSC) -> BT2020 (4K/UHD)"
+			echo
+			echo " 9 --> BT470BG (PAL) -> BT470M (NTSC)"
+			echo " 10 -> BT470BG (PAL) -> SMPTE170M (NTSC)"
+			echo " 11 -> BT470BG (PAL) -> BT709 (HD/FHD)"
+			echo " 12 -> BT470BG (PAL) -> BT2020 (4K/UHD)"
+			echo
+			echo " 13 -> BT709 (HD/FHD) -> BT470M (NTSC)"
+			echo " 14 -> BT709 (HD/FHD) -> SMPTE170M (NTSC)"
+			echo " 15 -> BT709 (HD/FHD) -> BT470BG (PAL)"
+			echo " 16 -> BT709 (HD/FHD) -> BT2020 (4K/UHD)"
+			echo
+			echo " 17 -> BT2020 (4K/UHD) -> BT470M (NTSC)"
+			echo " 18 -> BT2020 (4K/UHD) -> SMPTE170M (NTSC)"
+			echo " 19 -> BT2020 (4K/UHD) -> BT470BG (PAL)"
+			echo " 20 -> BT2020 (4K/UHD) -> BT709 (HD/FHD)"
+			echo
+			printf "Specify the Colorspace Conversion option [press 'Enter' to skip]: "
+			read csopt
+			case "$csopt" in
+				1)
+				cspace="iall=bt470m:ispace=bt470m:itrc=bt470m:iprimaries=bt470m:irange=$irange:all=smpte170m:space=smpte170m:trc=smpte170m:primaries=smpte170m:range=$orange:dither=fsb"
+				coloroptions="-color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m"
+				colr=":colr=nclc,6,6,6"
+				;;
+				2)
+				cspace="iall=bt470m:ispace=bt470m:itrc=bt470m:iprimaries=bt470m:irange=$irange:all=bt470bg:space=bt470bg:trc=bt470bg:primaries=bt470bg:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg"
+				colr=":colr=nclc,5,5,5"
+				;;
+				3)
+				cspace="iall=bt470m:ispace=bt470m:itrc=bt470m:iprimaries=bt470m:irange=$irange:all=bt709:space=bt709:trc=bt709:primaries=bt709:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt709 -color_trc bt709 -colorspace bt709"
+				colr=":colr=nclc,1,1,1"
+				;;
+				4)
+				video_csmisc_func
+				cspace="iall=bt470m:ispace=bt470m:itrc=bt470m:iprimaries=bt470m:irange=$irange:all=bt2020:space=bt2020ncl:trc=bt2020$bd:primaries=bt2020:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt2020 -color_trc bt2020$bd2 -colorspace bt2020$cm"
+				colr=":colr=nclc,9,$trsr,$cmatrix"
+				;;
+				5)
+				cspace="iall=smpte170m:ispace=smpte170m:itrc=smpte170m:iprimaries=smpte170m:irange=$irange:all=bt470m:space=bt470m:trc=bt470m:primaries=bt470m:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt470m -color_trc gamma22 -colorspace smpte170m"
+				colr=":colr=nclc,4,4,6"
+				;;
+				6)
+				cspace="iall=smpte170m:ispace=smpte170m:itrc=smpte170m:iprimaries=smpte170m:irange=$irange:all=bt470bg:space=bt470bg:trc=bt470bg:primaries=bt470bg:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg"
+				colr=":colr=nclc,5,5,5"
+				;;
+				7)
+				cspace="iall=smpte170m:ispace=smpte170m:itrc=smpte170m:iprimaries=smpte170m:irange=$irange:all=bt709:space=bt709:trc=bt709:primaries=bt709:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt709 -color_trc bt709 -colorspace bt709"
+				colr=":colr=nclc,1,1,1"
+				;;
+				8)
+				video_csmisc_func
+				cspace="iall=smpte170m:ispace=smpte170m:itrc=smpte170m:iprimaries=smpte170m:irange=$irange:all=bt2020:space=bt2020ncl:trc=bt2020$bd:primaries=bt2020:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt2020 -color_trc bt2020$bd2 -colorspace bt2020$cm"
+				colr=":colr=nclc,9,$trsr,$cmatrix"
+				;;
+				9)
+				cspace="iall=bt470bg:ispace=bt470bg:itrc=bt470bg:iprimaries=bt470bg:irange=$irange:all=bt470m:space=bt470m:trc=bt470m:primaries=bt470m:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt470m -color_trc gamma22 -colorspace smpte170m"
+				colr=":colr=nclc,4,4,6"
+				;;
+				10)
+				cspace="iall=bt470bg:ispace=bt470bg:itrc=bt470bg:iprimaries=bt470bg:irange=$irange:all=smpte170m:space=smpte170m:trc=smpte170m:primaries=smpte170m:range=$orange:dither=fsb"
+				coloroptions="-color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m"
+				colr=":colr=nclc,6,6,6"
+				;;
+				11)
+				cspace="iall=bt470bg:ispace=bt470bg:itrc=bt470bg:iprimaries=bt470bg:irange=$irange:all=bt709:space=bt709:trc=bt709:primaries=bt709:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt709 -color_trc bt709 -colorspace bt709"
+				colr=":colr=nclc,1,1,1"
+				;;
+				12)
+				video_csmisc_func
+				cspace="iall=bt470bg:ispace=bt470bg:itrc=bt470bg:iprimaries=bt470bg:irange=$irange:all=bt2020:space=bt2020ncl:trc=bt2020$bd:primaries=bt2020:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt2020 -color_trc bt2020$bd2 -colorspace bt2020$cm"
+				colr=":colr=nclc,9,$trsr,$cmatrix"
+				;;
+				13)
+				cspace="iall=bt709:ispace=bt709:itrc=bt709:iprimaries=bt709:irange=$irange:all=bt470m:space=bt470m:trc=bt470m:primaries=bt470m:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt470m -color_trc gamma22 -colorspace smpte170m"
+				colr=":colr=nclc,4,4,6"
+				;;
+				14)
+				cspace="iall=bt709:ispace=bt709:itrc=bt709:iprimaries=bt709:irange=$irange:all=smpte170m:space=smpte170m:trc=smpte170m:primaries=smpte170m:range=$orange:dither=fsb"
+				coloroptions="-color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m"
+				colr=":colr=nclc,6,6,6"
+				;;
+				15)
+				cspace="iall=bt709:ispace=bt709:itrc=bt709:iprimaries=bt709:irange=$irange:all=bt470bg:space=bt470bg:trc=bt470bg:primaries=bt470bg:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg"
+				colr=":colr=nclc,5,5,5"
+				;;
+				16)
+				video_csmisc_func
+				cspace="iall=bt709:ispace=bt709:itrc=bt709:iprimaries=bt709:irange=$irange:all=bt2020:space=bt2020ncl:trc=bt2020$bd:primaries=bt2020:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt2020 -color_trc bt2020$bd2 -colorspace bt2020$cm"
+				colr=":colr=nclc,9,$trsr,$cmatrix"
+				;;
+				17)
+				video_csmisc_func
+				cspace="iall=bt2020:ispace=bt2020ncl:itrc=bt2020$bd:iprimaries=bt2020:irange=$irange:all=bt470m:space=bt470m:trc=bt470m:primaries=bt470m:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt470m -color_trc gamma22 -colorspace smpte170m"
+				colr=":colr=nclc,4,4,6"
+				;;
+				18)
+				video_csmisc_func
+				cspace="iall=bt2020:ispace=bt2020ncl:itrc=bt2020$bd:iprimaries=bt2020:irange=$irange:all=smpte170m:space=smpte170m:trc=smpte170m:primaries=smpte170m:range=$orange:dither=fsb"
+				coloroptions="-color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m"
+				colr=":colr=nclc,6,6,6"
+				;;
+				19)
+				video_csmisc_func
+				cspace="iall=bt2020:ispace=bt2020ncl:itrc=bt2020$bd:iprimaries=bt2020:irange=$irange:all=bt470bg:space=bt470bg:trc=bt470bg:primaries=bt470bg:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt470bg -color_trc gamma28 -colorspace bt470bg"
+				colr=":colr=nclc,5,5,5"
+				;;
+				20)
+				video_csmisc_func
+				cspace="iall=bt2020:ispace=bt2020ncl:itrc=bt2020$bd:iprimaries=bt2020:irange=$irange:all=bt709:space=bt709:trc=bt709:primaries=bt709:range=$orange:dither=fsb"
+				coloroptions="-color_primaries bt709 -color_trc bt709 -colorspace bt709"
+				colr=":colr=nclc,1,1,1"
+				;;
+				"") true ;;
+				*)
+				error "-> Invalid option!"
+				exit 1
+				;;
+			esac
+			test ! -z "$cspace" && colorspace="colorspace=$cspace,"
+		fi
+	fi
+}
+
+printf "Use Post-Processing Video Filters? [y/N]: "
+read postproc
+if [ "$postproc" = "y" -o "$postproc" = "Y" ]; then
+	test "$VID_DENOISE" = "y" && video_denoise_func
+	test "$VID_NOISE" = "y" && video_noise_func
+	test "$VID_DEBLOCK" = "y" && video_deblock_func
+	test "$VID_SHARPEN" = "y" && video_sharpen_func
+	test "$VID_DEINTERLACE" = "y" && video_deinterlace_func
+	test "$VID_DETELECINE" = "y" && video_detelecine_func
+	test "$VID_PIXEL_FORMAT" = "y" && video_pixfmt_func
+	test "$VID_HDR_TO_SDR" = "y" && video_hdr_to_sdr_func
+	test "$VID_COLORSPACE" = "y" && video_colorspace_func
+	test "$VID_ROTATE" = "y" && video_rotate_func
+fi
+
+printf "Set the Output Video Aspect Ratio? [y/N]: "
+read vasp
+if [ "$vasp" = "y" -o "$vasp" = "Y" ]; then
+	printf "Sepcify the Aspect Ratio [4:3, 16:9, 1.3333, 1.7777,... - press 'Enter' to skip]: "
+	read vidar
+	test ! -z "$vidar" && aspect="-aspect:0 $vidar"
+fi
+
+if [ -z "$deinterlace" ]; then
+	printf "Enable Interlace-aware Encoding? [y/N]: "
+	read intaw
+	if [ "$intaw" = "y" -o "$intaw" = "Y" ]; then
+		interlaced="-flags +ilme+ildct"
+	fi
+fi
+
+# Used by cropping and bitrate
+# calc for target file size
+video_length_func() {
+	case "$1" in
+		file)	VLENGTH="$($FFPROBE -i "$input" -v quiet -select_streams v:$vidtrack -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 | tail -1 | awk -F. '{print $1}')" ;;
+		batch)	echo "VLENGTH=\"\$($FFPROBE -i \"\$i\" -v quiet -select_streams v:$vidtrack -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 | tail -1 | awk -F. '{print \$1}')\"" ;;
+	esac
+}
+
+if [ "$AUTOCROP" = "y" ]; then
+	if [ ! -z "$batchmode" ]; then
+		printf "Auto-Crop the Input Files? [y/N]: "
+		read autocrop
+		if [ "$autocrop" = "y" -o "$autocrop" = "Y" ]; then
+			CROPVAL="\$($FFMPEG -ss \$((\$VLENGTH/2)) -i \"\$i\" $vidmap -vf cropdetect=24:4 -frames:v 1000 -f null - 2>&1 | awk '/crop/ {print \$NF}' | awk -F= '{print \$2}' | tail -1)"
+			# CROPVAL="\$($MPLAYER \"\$i\" -noconfig all -loop 1 -vid $vidtrack -frames 250 -ss \$((\$VLENGTH/2)) -vf cropdetect=24:4 -ao null -vo null -nocache 2>/dev/null | tr '\r' '\n' | grep 'crop=' | tail -n 1 | awk '{print \$9}' | sed 's|crop=||g; s|).||g')"
+			crop="crop=\$CROPVAL,"
+		fi
+	else
+		echo
+		green "-> Detecting crop values..."
+		video_length_func file
+		if [ -z "$VLENGTH" -o "$VLENGTH" = "N/A" ]; then
+			vlength="300"
+		else
+			vlength="$VLENGTH"
+		fi
+		CROPVAL="$($FFMPEG -ss $(($vlength/2)) -i "$input" $vidmap -vf cropdetect=24:4 -frames:v 1000 -f null - 2>&1 | awk '/crop/ {print $NF}' | awk -F= '{print $2}' | tail -1)"
+		# CROPVAL="$($MPLAYER "$input" -noconfig all -loop 1 -vid $vidtrack -frames 250 -ss $(($vlength/2)) -vf cropdetect=24:4 -ao null -vo null -nocache 2>/dev/null | tr '\r' '\n' | grep 'crop=' | tail -n 1 | awk '{print $9}' | sed 's|crop=||g; s|).||g')"		if [ ! -z "$CROPVAL" ]; then
+		if [ ! -z "$CROPVAL" ]; then
+			green "-> Found crop values: $CROPVAL"
+		else
+			error "-> Could not find the crop values!"
+			CDEF="???"
+		fi
+		echo
+		CROPDETERMINED="n"
+		while [ "$CROPDETERMINED" != "y" ]; do
+			if [ -z "$cropval" ]; then
+				printf "Specify the Crop Values [default is $CROPVAL]: "
+			else
+				printf "Specify the Crop Values [last try: "$cropval"]: "
+			fi
+			read cropval
+			if [ -z "$cropval" -a "$CDEF" = "???" ]; then
+				crop=
+				echo
+				error "-> Crop values not specified!"
+				error "-> Skipping!"
+				echo
+			else
+				if [ -z "$cropval" ]; then
+					crop="crop=$CROPVAL,"
+					crop_preview="$CROPVAL"
+				else
+					crop="crop=$cropval,"
+					crop_preview="$cropval"
+				fi
+				printf "Preview the Crop Values for 10 seconds? [y/N]: "
+				read precrop
+				if [ "$precrop" = "y" -o "$precrop" = "Y" ]; then
+					printf "Specify the Start Position in hour:min:sec [default is 0:02:00]: "
+					read timepos
+					if [ -z "$timepos" ]; then
+						startpos="0:02:00"
+					else
+						startpos="$timepos"
+					fi
+					$MPLAYER "$input" -vid $vidtrack -vf rectangle=$crop_preview -noconfig all -nocache -ao null -ss $startpos -endpos 10 >/dev/null 2>&1
+				fi
+			fi
+			printf "Are you Satisfied with the Crop Area? [y/N]: "
+			read CROPDETERMINED
+		done
+	fi
+else
+	printf "Specify the Crop Values [press 'Enter' to skip]: "
+	read cropval
+	test ! -z "$cropval" && crop="crop=$cropval,"
+fi
+
+if [ "$SCALE" = "y" ]; then
+	echo
+	green "-> Detecting video resolution..."
+	sleep 1
+	WIDTH="$($FFPROBE -i "$input" -v quiet -select_streams v:$vidtrack -show_entries stream=width -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+	HEIGHT="$($FFPROBE -i "$input" -v quiet -select_streams v:$vidtrack -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+	if [ ! -z "$crop" ]; then
+		green "-> Original resolution: ${WIDTH}x${HEIGHT}"
+		if [ -z "$batchmode" ]; then
+			green "-> Cropped resolution:  $(echo "$crop" | sed 's|crop=||' | awk -F: '{print $1}')x$(echo "$crop" | awk -F: '{print $2}')"
+		fi
+	else
+		green "-> Detected ${WIDTH}x${HEIGHT}"
+	fi
+	echo
+	printf "Specify the Desired Resolution [WxH - press 'Enter' to skip]: "
+	read res
+	if [ ! -z "$res" ]; then
+		sws_func() {
+			case "$1" in
+				config)	swsopt="$SCALER" ;;
+				script)	test -z "$swsopt" && swsopt="9" || swsopt="$swsopt" ;;
+			esac
+			case "$swsopt" in
+				0)	scaler="fast_bilinear" ;;
+				1)	scaler="bilinear" ;;
+				2)	scaler="bicubic" ;;
+				3)	scaler="neighbor" ;;
+				4)	scaler="area" ;;
+				5)	scaler="bicublin" ;;
+				6)	scaler="gauss" ;;
+				7)	scaler="sinc" ;;
+				8)	scaler="lanczos" ;;
+				9)	scaler="spline" ;;
+				10)	scaler="experimental" ;;
+				*)
+				case "$1" in
+					script)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+			esac
+		}
+		if [ -z "$SCALER" ]; then
+			echo
+			brown " Software Scalers"
+			brown " ~~~~~~~~~~~~~~~~"
+			echo " 0 --> Fast Bilinear"
+			echo " 1 --> Bilinear"
+			echo " 2 --> Bicubic"
+			echo " 3 --> Nearest Neighbor"
+			echo " 4 --> Area Averaging"
+			echo " 5 --> Luma Bicubic/Chroma Bilinear"
+			echo " 6 --> Gaussian"
+			echo " 7 --> Sinc"
+			echo " 8 --> Lanczos"
+			echo " 9 --> Natural Bicubic Spline"
+			echo " 10 -> Experimental"
+			echo
+			printf "Sepcify the Software Scaler [default is 9]: "
+			read swsopt
+			sws_func script
+		else
+			case "$SCALER" in
+				[0-9]|10)
+				sws_func config
+				echo
+				green "-> Using software scaler '$scaler' set in config file '$CFG'"
+				echo
+				;;
+				*)
+				error "-> Invalid software scaler in config file '$CFG'"
+				exit 1
+				;;
+			esac
+		fi
+		printf "Tweak the Software Scaler? [y/N]: "
+		read swstweak
+		if [ "$swstweak" = "y" -o "$swstweak" = "Y" ]; then
+			case "$swsopt" in
+				2|9)
+				echo
+				brown "Scaler Tuning"
+				brown "~~~~~~~~~~~~~"
+				echo " 0 -> Default (0.00, 0.60)"
+				echo " 1 -> Catmull-Rom Spline (0.00, 0.50)"
+				echo " 2 -> Mitchell-Netravali Spline (0.33, 0.33)"
+				echo " 3 -> Cubic B-Spline (1.00, 0.00)"
+				echo " 4 -> Custom"
+				echo
+				printf "Specify the Scaler Tuning Option [default is 1]: "
+				read swstune
+				case "$swstune" in
+					0)	swsparam0=":param0=0.00"; swsparam1=":param1=0.60" ;;
+					1|"")	swsparam0=":param0=0.00"; swsparam1=":param1=0.50" ;;
+					2)	swsparam0=":param0=0.33"; swsparam1=":param1=0.33" ;;
+					3)	swsparam0=":param0=1.00"; swsparam1=":param1=0.00" ;;
+					4)
+					printf "Specify the Custom Scaler Tuning values [default is 0.00:0.60]: "
+					read swscus
+					if [ ! -z "$swscus" ]; then
+						swsparam0=":param0=$(echo "$swscus" | awk -F: '{print $1}')"
+						swsparam1=":param1=$(echo "$swscus" | awk -F: '{print $2}')"
+					fi
+					;;
+					*)
+					error "-> Invalid option"
+					exit 1
+					;;
+				esac
+				;;
+				6|8)
+				if [ "$swsopt" = "6" ]; then
+					swscaler="Gaussian"
+					swsval="0-100"
+					swsdef="0"
+					swstype="Sharpness"
+				else
+					swscaler="Lanczos"
+					swsval="1-10"
+					swsdef="1"
+					swstype="Filter Length"
+				fi
+				printf "Specify the $swscaler scaler $swstype [$swsval - default is $swsdef]: "
+				read swstune
+				test ! -z "$swstune" && swsparam0=":param0=$swstune"
+				;;
+			esac
+			printf "Enable Accurate Rounding? [y/N]: "
+			read around
+			if [ "$around" = "y" -o "$around" = "Y" ]; then
+				accuround="+accurate_rnd"
+			fi
+			printf "Enable Full Chroma Input? [y/N]: "
+			read fcinp
+			if [ "$fcinp" = "y" -o "$fcinp" = "Y" ]; then
+				fullchroma_inp="+full_chroma_inp"
+			fi
+			printf "Enable Full Chroma Interpolation? [y/N]: "
+			read fcint
+			if [ "$fcint" = "y" -o "$fcint" = "Y" ]; then
+				fullchroma_int="+full_chroma_int"
+			fi
+		fi
+		test ! -z "$interlaced" && interl=":interl=1"
+		scale="scale=$res$interl:flags=$scaler$accuround$fullchroma_inp$fullchroma_int$swsparam0$swsparam1,"
+	fi
+fi
+
+if [ "$VID_FPS_CONVERT" = "y" ]; then
+	# Not supported with interlaced encoding,
+	# deinterlacing with a bobber and IVTC
+	if [ -z "$interlaced" -a -z "$bob" -a -z "$detelecine" ]; then
+		echo
+		green "-> Detecting FPS value..."
+		sleep 1
+		video_fps_func
+		if [ ! -z "$GETFPS" ]; then
+			green "-> Detected $(echo "scale=3; $GETFPS" | $BC -l) FPS"
+		else
+			error "-> Could not detect the FPS value!"
+		fi
+		echo
+		printf "Do an FPS Conversion? [y/N]: "
+		read fpscon
+		if [ "$fpscon" = "y" -o "$fpscon" = "Y" ]; then
+			case "$GETFPS" in
+				24/1|25/1|24000/1001|30000/1001|50/1|60000/1001|60/1) true ;;
+				""|*)
+				echo
+				error "-> Detected FPS is not supported yet!"
+				error "-> Supported FPS are: 23.976, 24, 25, 29.970, 50, 59.940 and 60"
+				echo
+				printf "Specify the FPS value of the Input File [no default!]: "
+				read infps
+				case "$infps" in
+					23.976|24|25|29.970|50|59.940|60) true ;;
+					""|*)
+					error "-> Unsupported or no value given!"
+					exit 1
+					;;
+				esac
+				;;
+			esac
+			echo
+			brown " FPS Conversion Filters"
+			brown " ~~~~~~~~~~~~~~~~~~~~~~"
+			echo " 0 -> fps (converts by duplicating/dropping of frames)"
+			echo " 1 -> setpts + atempo (converts by PTS + audio speedup/down)"
+			echo " 2 -> framestep (frame rate halving - for options 18-20)"
+			echo
+			printf "Specify the FPS Conversion Method [default is 0]: "
+			read fcm
+			case "$fcm" in
+				0|1|2|"") true ;;
+				*)
+				error "-> Invalid option!"
+				exit 1
+				;;
+			esac
+			echo
+			brown " FPS Conversion"
+			brown " ~~~~~~~~~~~~~~"
+			echo " 0 --> 23.976 FPS to 24 FPS        12 -> 50 FPS to 59.940 FPS       23 -> 50 FPS to 29.970 FPS"
+			echo " 1 --> 23.976 FPS to 25 FPS        13 -> 50 FPS to 60 FPS   "
+			echo " 2 --> 23.976 FPS to 29.970 FPS                                     24 -> 59.940 FPS to 23.976 FPS "
+			echo "                                   14 -> 59.940 FPS to 50 FPS       25 -> 59.940 FPS to 24 FPS"
+			echo " 3 --> 24 FPS to 23.976 FPS        15 -> 59.940 FPS to 60 FPS       26 -> 59.940 FPS to 25 FPS"
+			echo " 4 --> 24 FPS to 25 FPS"
+			echo " 5 --> 24 FPS to 29.970 FPS        16 -> 60 FPS to 50 FPS           27 -> 60 FPS to 23.976 FPS"
+			echo "                                   17 -> 60 FPS to 59.940 FPS       28 -> 60 FPS to 24 FPS"
+			echo " 6 --> 25 FPS to 23.976 FPS                                         29 -> 60 FPS to 25 FPS"
+			echo " 7 --> 25 FPS to 24 FPS            18 -> 50 FPS to 25 FPS           30 -> 60 FPS to 29.970 FPS"
+			echo " 8 --> 25 FPS to 29.970 FPS        19 -> 59.940 FPS to 29.970 FPS"
+			echo "                                   20 -> 60 FPS to 30 FPS" 
+			echo " 9 --> 29.970 FPS to 23.976 FPS"
+			echo " 10 -> 29.970 FPS to 24 FPS        21 -> 50 FPS to 23.976 FPS"
+			echo " 11 -> 29.970 FPS to 25 FPS        22 -> 50 FPS to 24 FPS"
+			echo
+			printf "Specify the FPS Conversion option [press 'Enter' to skip]: "
+			read fpsopt
+			case "$fpsopt" in
+				0)
+				case "$fcm" in
+					0|"")	fps="fps=fps=24," ;;
+					1)	setpts="setpts=23976/24000*PTS,"; atempo="atempo=1.001001001," ;;
+				esac
+				ofps="-r 24/1"
+				;;
+				1)
+				case "$fcm" in
+					0|"")	fps="fps=fps=25," ;;
+					1)	setpts="setpts=23976/25000*PTS,"; atempo="atempo=1.04270937604270937604," ;;
+				esac
+				ofps="-r 25/1"
+				;;
+				2)
+				case "$fcm" in
+					0|"")	fps="fps=fps=30000/1001," ;;
+					1)	setpts="setpts=23976/29970*PTS,"; atempo="atempo=1.25," ;;
+				esac
+				ofps="-r 30000/1001"
+				;;
+				3)
+				case "$fcm" in
+					0|"")	fps="fps=fps=24000/1001," ;;
+					1)	setpts="setpts=24000/23976*PTS,"; atempo="atempo=0.999," ;;
+				esac
+				ofps="-r 24000/1001"
+				;;
+				4)
+				case "$fcm" in
+					0|"")	fps="fps=fps=25," ;;
+					1)	setpts="setpts=24000/25000*PTS,"; atempo="atempo=1.04166666667," ;;
+				esac
+				ofps="-r 25/1"
+				;;
+				5)
+				case "$fcm" in
+					0|"")	fps="fps=fps=30000/1001," ;;
+					1)	setpts="setpts=24000/29970*PTS,"; atempo="atempo=1.24875," ;;
+				esac
+				ofps="-r 30000/1001"
+				;;
+				6)
+				case "$fcm" in
+					0|"")	fps="fps=fps=24000/1001," ;;
+					1)	setpts="setpts=25000/23976*PTS,"; atempo="atempo=0.95904," ;;
+				esac
+				ofps="-r 24000/1001"
+				;;
+				7)
+				case "$fcm" in
+					0|"")	fps="fps=fps=24," ;;
+					1)	setpts="setpts=25000/24000*PTS,"; atempo="atempo=0.96," ;;
+				esac
+				ofps="-r 24/1"
+				;;
+				8)
+				case "$fcm" in
+					0|"")	fps="fps=fps=30000/1001," ;;
+					1)	setpts="setpts=25000/29970*PTS,"; atempo="atempo=1.1988," ;;
+				esac
+				ofps="-r 30000/1001"
+				;;
+				9)
+				case "$fcm" in
+					0|"")	fps="fps=fps=24000/1001," ;;
+					1)	setpts="setpts=29970/23976*PTS,"; atempo="atempo=0.8," ;;
+				esac
+				ofps="-r 24000/1001"
+				;;
+				10)
+				case "$fcm" in
+					0|"")	fps="fps=fps=24," ;;
+					1)	setpts="setpts=29970/24000*PTS,"; atempo="atempo=0.800800800801," ;;
+				esac
+				ofps="-r 24/1"
+				;;
+				11)
+				case "$fcm" in
+					0|"")	fps="fps=fps=25," ;;
+					1)	setpts="setpts=29970/25000*PTS,"; atempo="atempo=0.83416750083416750083," ;;
+				esac
+				ofps="-r 25/1"
+				;;
+				12)
+				case "$fcm" in
+					0|"")	fps="fps=fps=60000/1001," ;;
+					1)	setpts="setpts=50000/59940*PTS,"; atempo="atempo=1.1988," ;;
+				esac
+				ofps="-r 60000/1001"
+				;;
+				13)
+				case "$fcm" in
+					0|"")	fps="fps=fps=60," ;;
+					1)	setpts="setpts=50000/60000*PTS,"; atempo="atempo=1.2," ;;
+				esac
+				ofps="-r 60/1"
+				;;
+				14)
+				case "$fcm" in
+					0|"")	fps="fps=fps=50," ;;
+					1)	setpts="setpts=59940/50000*PTS,"; atempo="atempo=0.83416750083416750083," ;;
+				esac
+				ofps="-r 50/1"
+				;;
+				15)
+				case "$fcm" in
+					0|"")	fps="fps=fps=60," ;;
+					1)	setpts="setpts=59940/60000*PTS,"; atempo="atempo=1.00100100100100100100," ;;
+				esac
+				ofps="-r 60/1"
+				;;
+				16)
+				case "$fcm" in
+					0|"")	fps="fps=fps=50," ;;
+					1)	setpts="setpts=60000/50000*PTS,"; atempo="atempo=0.83333333333333333333," ;;
+				esac
+				ofps="-r 50/1"
+				;;
+				17)
+				case "$fcm" in
+					0|"")	fps="fps=fps=60000/1001," ;;
+					1)	setpts="setpts=60000/59940*PTS,"; atempo="atempo=0.999," ;;
+				esac
+				ofps="-r 60000/1001"
+				;;
+				18)
+				ofps="-r 25/1"
+				;;
+				19)
+				ofps="-r 30000/1001"
+				;;
+				20)
+				ofps="-r 30/1"
+				;;
+				21)
+				setpts="framestep=step=2,setpts=25000/23976*PTS,"; atempo="atempo=0.95904,"
+				ofps="-r 24000/1001"
+				;;
+				22)
+				setpts="framestep=step=2,setpts=25000/24000*PTS,"; atempo="atempo=0.96,"
+				ofps="-r 24/1"
+				;;
+				23)
+				setpts="framestep=step=2,setpts=25000/29970*PTS,"; atempo="atempo=1.1988,"
+				ofps="-r 30000/1001"
+				;;
+				24)
+				setpts="framestep=step=2,setpts=29970/23976*PTS,"; atempo="atempo=0.8,"
+				ofps="-r 24000/1001"
+				;;
+				25)
+				setpts="framestep=step=2,setpts=29970/24000*PTS,"; atempo="atempo=0.800800800801,"
+				ofps="-r 24/1"
+				;;
+				26)
+				setpts="framestep=step=2,setpts=29970/25000*PTS,"; atempo="atempo=0.83416750083416750083,"
+				ofps="-r 25/1"
+				;;
+				27)
+				setpts="framestep=step=2,setpts=30000/23976*PTS,"; atempo="atempo=0.7992,"
+				ofps="-r 24000/1001"
+				;;
+				28)
+				setpts="framestep=step=2,setpts=30000/24000*PTS,"; atempo="atempo=0.8,"
+				ofps="-r 24/1"
+				;;
+				29)
+				setpts="framestep=step=2,setpts=30000/25000*PTS,"; atempo="atempo=0.83333333333333333333,"
+				ofps="-r 25/1"
+				;;
+				30)
+				setpts="framestep=step=2,setpts=30000/29970*PTS,"; atempo="atempo=0.999,"
+				ofps="-r 30000/1001"
+				;;
+				"")
+				true
+				;;
+				*)
+				error "-> Invalid option!"
+				exit 1
+				;;
+			esac
+			case "$fpsopt" in
+				18|19|20)
+				if [ "$fcm" != "2" ]; then
+					error "-> Options 18-20 support only the 'framestep' filter!"
+					exit 1
+				fi
+				framestep="framestep=step=2,"
+				;;
+				2[1-9]|30)
+				if [ "$fcm" != "1" ]; then
+					error "-> Options 21-30 support only the 'setpts' filter!"
+					exit 1
+				fi
+				;;
+				"")
+				true
+				;;
+				*)
+				if [ "$fcm" = "2" ]; then
+					error "-> The 'framestep' filter is supported only by options 18-20!"
+					exit 1
+				fi
+				;;
+			esac
+		fi
+	fi
+fi
+
+################ Subs stuff #################
+
+video_subtitles_func() {
+	case "$1" in
+		infile)
+		printf "How many Subtitles to Copy? [0-inf - default is 1]: "
+		read subcp
+		case "$subcp" in
+			0)	SUBCP="0" ;;
+			[1-9]*) SUBCP="$subcp" ;;
+			"")	SUBCP="1" ;;
+			*)
+			error "-> Invalid value!"
+			exit 1
+			;;
+		esac
+		case "$CONFMT" in
+			mkv|mp4|m4v|mov) true ;;
+			*)
+			error "-> The $CONFMT container doesn't support SRT/SSA/ASS subtitles!"
+			error "-> Supported containers are: mkv, mp4, m4v, mov, m2ts, mts and ts"
+			exit 1
+			;;
+		esac
+		if [ "$SUBCP" != "0" ]; then
+			for i in $(eval echo "{1..$SUBCP}"); do
+				subindex[i]="$(($i-1))"
+				printf "Sub $i: Specify a Subtitle to Copy [example: 0:2]: "
+				read subnr[i]
+				if [ ! -z "${subnr[i]}" ]; then
+					printf "Sub $i: Specify the 3-letter Language Code for Metadata [press 'Enter' to skip]: "
+					read slang[i]
+					test ! -z "${slang[i]}" && sublang[i]="-metadata:s:s:${subindex[i]} language=${slang[i]}"
+					# Workaround for an ffmpeg disposition issue
+					# where in some cases it flags subsequent tracks
+					# as default.
+					test "$i" = "1" && sdis="default" || sdis="none"
+					case "$CONFMT" in
+						mp4|m4v|mov)	submuxer_in="mov_text" ;;
+						*)		submuxer_in="copy" ;;
+					esac
+					subcopy[i]="-map ${subnr[i]} -c:s:${subindex[i]} $submuxer_in ${sublang[i]} -disposition:s:${subindex[i]} $sdis"
+				else
+					error "-> No value given!"
+					exit 1
+				fi
+			done
+			test "$subopt" = "2" && echo
+		fi
+		;;
+		ext)
+		case "$CONFMT" in
+			mkv|mp4|m4v) true ;;
+			*)
+			error "-> The $CONFMT container doesn't support SRT/SSA/ASS subtitles!"
+			error "-> Supported containers are: mkv"
+			exit 1
+			;;
+		esac
+		if [ ! -z "$remuxcon" ]; then
+			for i in $remuxcon; do
+				case "$i" in
+					mkv|mp4|m4v|mov) true ;;
+					*)
+					echo
+					error "-> Warning: One or more chosen additional container"
+					error "   doesn't support SRT/SSA/ASS subtitles!"
+					error "-> Subtitles will be ignored during remuxing!"
+					echo
+					break
+					;;
+				esac
+			done
+		fi
+		printf "How many External Subtitles to Add? [0-inf - default is 1]: "
+		read subext
+		case "$subext" in
+			0)	SUBEXT="0" ;;
+			[1-9]*) SUBEXT="$subext" ;;
+			"")	SUBEXT="1" ;;
+			*)
+			error "-> Invalid value!"
+			exit 1
+			;;
+		esac
+		if [ "$SUBEXT" != "0" ]; then
+			for i in $(eval echo "{1..$SUBEXT}"); do
+				test ! -z "${subindex[*]}" && subidx[i]="$((${subindex[-1]}+$i))" || subidx[i]="$(($i-1))"
+				printf "Sub $i: Specify the Subtitle File: "
+				read -e subfile[i]
+				if [ ! -f "${subfile[i]}" ]; then
+					error "-> No such file!"
+					exit 1
+				else
+					printf "Sub $i: Specify the 3-letter Language Code for Metadata [press 'Enter' to skip]: "
+					read slng[i]
+					test ! -z "${slng[i]}" && sublng[i]="-metadata:s:s:${subidx[i]} language=${slng[i]}"
+					if [ ! -z "${subindex[*]}" ]; then
+						sdispo="none"
+					else
+						test "$i" = "1" && sdispo="default" || sdispo="none"
+					fi
+					case "$CONFMT" in
+						mp4|m4v|mov)	submuxer_ext="mov_text" ;;
+						*)		submuxer_ext="copy" ;;
+					esac
+					EXTSUBS[i]="-i \"$(readlink -e "${subfile[i]}")\""
+					subcpy[i]="-map $i:0 -c:s:${subidx[i]} $submuxer_ext ${sublng[i]} -disposition:s:${subidx[i]} $sdispo"
+				fi
+			done
+		fi
+		;;
+	esac
+}
+
+if [ "$SUBS" = "y" ]; then
+	echo
+	green "-> Detecting subtitles..."
+	sleep 1
+	SUBSDETECT="$($FFPROBE -i "$input" 2>&1 | grep 'Stream #' | grep 'Subtitle' | sed 's|    ||g')"
+	if [ ! -z "$SUBSDETECT" ]; then
+		SUBNR="$(echo "$SUBSDETECT" | wc -l)"
+		echo
+		green "$SUBSDETECT"
+		echo
+		green "-> Detected $SUBNR subtitles"
+		error "-> Note: not all containers support all types of subs!"
+	else
+		error "-> Could not detect any subtitles!"
+	fi
+	echo
+	brown " Subtitles"
+	brown " ~~~~~~~~~"
+	echo " 0 -> Copy subtitles from the input file (SRT/SSA/ASS only!)"
+	echo " 1 -> Add external subtitle files (SRT/SSA/ASS only!)"
+	echo " 2 -> Copy subs from input file + add external ones (SRT/SSA/ASS only!)"
+	echo " 3 -> Hardcode a subtitle (SRT/SSA/ASS only!)"
+	echo
+	printf "Specify the Subtitle Option [press 'Enter' to skip]: "
+	read subopt
+	case "$subopt" in
+		0) video_subtitles_func infile ;;
+		1) video_subtitles_func ext ;;
+		2)
+		video_subtitles_func infile
+		video_subtitles_func ext
+		if [ ! -z "${subcopy[*]}" -a ! -z "${subcpy[*]}" ]; then
+			printf "Flag first Internal (i) or External (e) Sub as Default? [i/e - default is i]: "
+			read subdef
+			case "$subdef" in
+				i*|I*|"")
+				subcopy[1]="$(echo "${subcopy[1]}" | sed 's|none$|default|')"
+				subcpy[1]="$(echo "${subcpy[1]}" | sed 's|default$|none|')"
+				;;
+				e*|E*)
+				subcopy[1]="$(echo "${subcopy[1]}" | sed 's|default$|none|')"
+				subcpy[1]="$(echo "${subcpy[1]}" | sed 's|none$|default|')"
+				;;
+				*)
+				error "-> Invalid option!"
+				exit 1
+				;;
+			esac
+		fi
+		;;
+		3)
+		echo
+		echo " 0 -> Hardcode an External Subtitle (SRT/SSA/ASS only!)"
+		echo " 1 -> Hardcode an Embedded Subtitle (SRT/SSA/ASS only!)"
+		echo
+		printf "Specify the Subtitle Option [press 'Enter' to skip]: "
+		read sub
+		case "$sub" in
+			0)
+			printf "Provide the Subtitle File: "
+			read -e subfile
+			if [ ! -z "$subfile" ]; then
+				if [ ! -f "$subfile" ]; then
+					echo
+					error "-> No such file! Skipping!"
+					echo
+				else
+					subtitles="subtitles=\"$(realpath -e "$subfile")\","
+				fi
+			fi
+			;;
+			1)
+			printf "Specify the Subtitle Position [default is 0 (first sub)]: "
+			read subpos
+			if [ ! -z "$batchmode" ]; then
+				test -z "$subpos" && subtitles="subtitles=\"\$i\":si=0," || subtitles="subtitles=\"\$i\":si=$subpos,"
+			else
+				test -z "$subpos" && subtitles="subtitles=\"$(realpath -e "$input")\":si=0," || subtitles="subtitles=\"$(realpath -e "$input")\":si=$subpos,"
+			fi
+			;;
+			""|*)
+			true
+			;;
+		esac
+		;;
+		"")
+		true
+		;;
+		*)
+		error "-> Invalid option!"
+		exit 1
+		;;
+	esac
+	subparams="${subcopy[*]} ${subcpy[*]}"
+fi
+
+test -z "$(echo "$subparams" | sed 's| ||g')" && subparams="-sn"
+
+################ Audio stuff ################
+
+echo
+green "-> Detecting audio tracks..."
+echo
+sleep 1
+AUDTRKS="$($FFPROBE -i "$input" 2>&1 | grep 'Stream #' | grep 'Audio' | sed 's|    ||g')"
+if [ ! -z "$AUDTRKS" ]; then
+	ATRKS="$(echo "$AUDTRKS" | wc -l)"
+	green "$AUDTRKS"
+	echo
+	green "-> Detected $ATRKS audio tracks"
+else
+	error "-> Could not detect any audio tracks!"
+fi
+echo
+
+printf "How many Audio Tracks to Encode or Copy? [0-inf - default is 1]: "
+read atracks
+case "$atracks" in
+	0) 	audparams[1]="-an"; abitrate[1]="0"; ATRACKS="0" ;;
+	[1-9]*)	ATRACKS="$atracks" ;;
+	"")	ATRACKS="1" ;;
+	*)
+	error "-> Invalid value!"
+	exit 1
+	;;
+esac
+
+if [ "$ATRACKS" != "0" ]; then
+	# Making it "global" so I don't have to
+	# worry about adding experimental codecs
+	# support
+	strict="-strict -2"
+	
+	if [ ! -z "$batchmode" ]; then
+		echo
+		error "-> Due to current codebase limitations, automatic audio metadata"
+		error "   will be that of the first provided input file. If all input files"
+		error "   have the same audio properties (bit depth, sample rate, etc)"
+		error "   this won't be an issue. Usually, complete seasons of film series"
+		error "   have the same audio properties."
+		error "   Otherwise you may want to:"
+		echo
+		error "-> Disable auto metadata completely"
+		echo
+		error "-> Enable it but you will need to modify the batchfile yourself and"
+		error "   update the data to reflect the correct audio properties. Then"
+		error "   encode from there."
+		echo
+		error "-> Encode each file individually (no batch mode). That way, you'll"
+		error "   have correct audio metadata for all files."
+		echo
+		printf "Disable Automatic Audio Metadata? [y/N]: "
+		read noautometa
+		if [ "$noautometa" = "y" -o "$noautometa" = "Y" ]; then
+			noaudmeta="1"
+		fi
+		echo
+	fi
+	
+	for i in $(eval echo "{1..$ATRACKS}"); do
+		audindex[i]="$(($i-1))"
+		printf "Track $i: Specify the Audio Track to Encode or Copy [default is 0:1]: "
+		read astream[i]
+		test -z "${astream[i]}" && atrack[i]="0:1" || atrack[i]="${astream[i]}"
+		
+		audmap[i]="-map ${atrack[i]}"
+		
+		printf "Track $i: Specify the 3-letter Language Code for Metadata [press 'Enter' to skip]: "
+		read alang[i]
+		test ! -z "${alang[i]}" && audlang[i]="-metadata:s:a:${audindex[i]} language=${alang[i]}"
+	done
+	
+	if [ -z "$DEFAULT_AUD_CODEC" ]; then
+		echo
+		brown " Available Audio Codecs"
+		brown " ~~~~~~~~~~~~~~~~~~~~~~"
+		echo " AC3 -----> Channels Support: 6"
+		echo " EAC3 ----> Channels Support: 6"
+		echo " DTS -----> Channels Support: 6"
+		echo " AAC -----> Channels Support: 8"
+		echo " FDK-AAC -> Channels Support: 8"
+		echo " Libopus -> Channels Support: 8"
+		echo " Opus ----> Channels Support: 2"
+		echo " Vorbis --> Channels Support: 8"
+		echo " MP3 -----> Channels Support: 2"
+		echo " WMAv1 ---> Channels Support: 2"
+		echo " WMAv2 ---> Channels Support: 2"
+		echo " TrueHD --> Channels Support: 6"
+		echo " FLAC ----> Channels Support: 8"
+		echo " ALAC ----> Channels Support: 8"
+		echo " PCM -----> Channels Support: 8"
+		echo " COPY ----> Channels Support: depends on audio codec"
+	else
+		echo
+		green "-> Using default audio codec set in config file: $DEFAULT_AUD_CODEC"
+	fi
+	
+	for i in $(eval echo "{1..$ATRACKS}"); do
+		echo
+		# Workaround for an ffmpeg disposition issue
+		# where in some cases it flags subsequent
+		# tracks as default.
+		test "$i" = "1" && adispo="default" || adispo="none"
+		auddispo[i]="-disposition:a:${audindex[i]} $adispo"
+		
+		if [ -z "$DEFAULT_AUD_CODEC" ]; then
+			case "${OUTPUT##*.}" in
+				mp4|m4v|mov)	defacodec[i]="AAC" ;;
+				avi)		defacodec[i]="MP3" ;;
+				wmv)		defacodec[i]="WMAv2" ;;
+				*)		defacodec[i]="AC3" ;;
+			esac
+			printf "Track $i: Specify the Audio Codec [default is ${defacodec[i]}]: "
+			read acodec[i]
+		else
+			acodec[i]="$DEFAULT_AUD_CODEC"
+		fi
+		test -z "${acodec[i]}" && acodec[i]="${defacodec[i]}"
+		acodec[i]="$(echo "${acodec[i]}" | tr '[:upper:]' '[:lower:]')"
+		case "${acodec[i]}" in
+			ac3)
+			acdc[i]="ac3"
+			acdcmeta[i]="AC-3"
+			abropts[i]="192/384/448/640"
+			abrdef[i]="640"
+			;;
+			eac3)
+			acdc[i]="eac3"
+			acdcmeta[i]="E-AC-3"
+			abropts[i]="32-6144"
+			abrdef[i]="960"
+			;;
+			truehd)
+			acdc[i]="truehd"
+			acdcmeta[i]="TrueHD"
+			abropts[i]="1000-18000"
+			abrdef[i]="5000"
+			skiptfs="1"
+			;;
+			dts)
+			acdc[i]="dca"
+			acdcmeta[i]="DTS"
+			abropts[i]="754/1509"
+			abrdef[i]="1509"
+			;;
+			aac)
+			acdc[i]="aac"
+			acdcmeta[i]="LC-AAC"
+			abropts[i]="32-512"
+			abrdef[i]="448"
+			;;
+			fdk*)
+			acdc[i]="libfdk_aac"
+			abropts[i]="8-512"
+			abrdef[i]="320"
+			;;
+			mp3)
+			acdc[i]="libmp3lame"
+			acdcmeta[i]="MP3"
+			abropts[i]="32-320"
+			abrdef[i]="320"
+			;;
+			libopus)
+			acdc[i]="libopus"
+			acdcmeta[i]="Opus"
+			abropts[i]="6-512"
+			abrdef[i]="320"
+			;;
+			opus)
+			acdc[i]="opus"
+			acdcmeta[i]="Opus"
+			abropts[i]="6-512"
+			abrdef[i]="192"
+			;;
+			vorbis)
+			acdc[i]="libvorbis"
+			acdcmeta[i]="Vorbis"
+			abropts[i]="6-500"
+			abrdef[i]="320"
+			;;
+			wmav1)
+			acdc[i]="wmav1"
+			acdcmeta[i]="WMAv1"
+			abropts[i]="64-320"
+			abrdef[i]="192"
+			;;
+			wmav2)
+			acdc[i]="wmav2"
+			acdcmeta[i]="WMAv2"
+			abropts[i]="64-320"
+			abrdef[i]="192"
+			;;
+			flac)
+			acdc[i]="flac"
+			acdcmeta[i]="FLAC"
+			abropts[i]="0(low)-12(high)"
+			abrdef[i]="5"
+			skiptfs="1"
+			;;
+			alac)
+			acdc[i]="alac"
+			acdcmeta[i]="ALAC"
+			abropts[i]="0(low)-12(high)"
+			abrdef[i]="5"
+			skiptfs="1"
+			;;
+			pcm)
+			acdcmeta[i]="PCM"
+			skiptfs="1"
+			;;
+			copy)
+			acdc[i]="copy"
+			# FPS conversion is incompatible with audio stream copy for
+			# obvious reasons. We can't speed up or slow down audio that's
+			# being copied. Audio filters have no effect on stream copy.
+			# We only clear the video filter and fps here. No need to
+			# also clear the audio filter since it never reaches the
+			# below $afilters filter chain.
+			# Exception is the 'fps' filter, which seems to work fine
+			# with audio copy and doesn't introduce any A/V desync,
+			# according to my testing
+			if [ ! -z "$setpts" ]; then
+				skipsetpts="1"
+				setpts=
+				ofps=
+			fi
+			;;
+			*)
+			error "-> Unsupported audio codec: ${acodec[i]}"
+			exit 1
+			;;
+		esac
+		
+		conerror_func() {
+			if [ ! -z "$remuxcon" ]; then
+				error "-> Additional container $c does not support ${acodec[i]} audio!"
+			else
+				error "-> The $c container does not support ${acodec[i]} audio!"
+				error "-> Check your config file, if needed, in '$CFG'"
+			fi
+			error "-> See: https://en.wikipedia.org/wiki/Comparison_of_video_container_formats"
+			exit 1
+		}
+		
+		# mkv is missing from the list since it supports
+		# all the audio codecs supported by the script
+		for c in $CONFMT $remuxcon; do
+			case "$c" in
+				mp4)
+				case "${acodec[i]}" in
+					pcm|libopus|opus|alac|wmav1|wmav2) conerror_func ;;
+				esac
+				;;
+				m4v)
+				case "${acodec[i]}" in
+					eac3|dts|vorbis|flac|pcm|libopus|opus|truehd|wmav1|wmav2) conerror_func ;;
+				esac
+				;;
+				mov)
+				case "${acodec[i]}" in
+					pcm|libopus|opus|wmav1|wmav2|truehd|flac) conerror_func ;;
+				esac
+				;;
+				avi)
+				case "${acodec[i]}" in
+					libopus|opus|truehd|eac3|alac) conerror_func ;;
+				esac
+				;;
+				wmv)
+				case "${acodec[i]}" in
+					libopus|opus|truehd|alac) conerror_func ;;
+				esac
+				;;
+			esac
+		done
+		
+		aidx[i]="$(($(echo "${atrack[i]}" | awk -F: '{print $2}')-1))"
+		test "${aidx[i]}" = "-1" && aidx[i]="0"
+		
+		if [ "${acodec[i]}" != "copy" ]; then
+			case "${acodec[i]}" in
+				truehd)	abdmeta[i]=", 16 bits" ;;
+				*)
+				GETAUDBD[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=bits_per_raw_sample -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+				case "${GETAUDBD[i]}" in
+					[1-9]*)	abdmeta[i]=", ${GETAUDBD[i]} bits input" ;;
+				esac
+				;;
+			esac
+			case "${acodec[i]}" in
+				fdk*)
+				printf "Track $i: Which AAC Profile to Use? [LC/HE/HEv2/LD - default is LC]: "
+				read aprof[i]
+				case "${aprof[i]}" in
+					lc|LC|"")	acdcmeta[i]="LC-AAC"; aacprof[i]="aac_low" ;;
+					he|HE)		acdcmeta[i]="HE-AACv1"; aacprof[i]="aac_he" ;;
+					hev2|HEv2|HEV2)	acdcmeta[i]="HE-AACv2"; aacprof[i]="aac_he_v2" ;;
+					ld|LD)		acdcmeta[i]="LD-AAC"; aacprof[i]="aac_ld" ;;
+					*)
+					error "- Invalid AAC profile!"
+					exit 1
+					;;
+				esac
+				audprofile[i]="-profile:a:${audindex[i]} ${aacprof[i]} -afterburner:a:${audindex[i]} 1"
+				;;
+				flac|alac)
+				test "${acodec[i]}" = "flac" && cdcname[i]="FLAC" || cdcname[i]="ALAC"
+				printf "Track $i: Specify the ${cdcname[i]} Compression Level [${abropts[i]} - default is ${abrdef[i]}]: "
+				read abr[i]
+				test -z "${abr[i]}" && acomplevel[i]="${abrdef[i]}" || acomplevel[i]="${abr[i]}"
+				audcomplevel[i]="-compression_level:a:${audindex[i]} ${acomplevel[i]}"
+				case "${acodec[i]}" in
+					flac)
+					printf "Track $i: Which FLAC Bit Depth to Use? [16/24 - default is 24]: "
+					read fbd[i]
+					case "${fbd[i]}" in
+						16)	flacbd[i]="s16"; abdmeta[i]=", 16 bits" ;;
+						24|"")	flacbd[i]="s32"; abdmeta[i]=", 24 bits" ;;
+						*)
+						error "-> Unsupported FLAC Bit Depth!"
+						exit 1
+						;;
+					esac
+					audbd[i]="-sample_fmt ${flacbd[i]}"
+					;;
+				esac
+				abtrmeta[i]=" @ CL ${acomplevel[i]}"
+				;;
+				pcm)
+				printf "Track $i: Which PCM Bit Depth to Use? [16/24/32 - default is 24]: "
+				read pcmbd[i]
+				case "${pcmbd[i]}" in
+					16)	acdc[i]="pcm_s16le"; abdmeta[i]=", 16 bits" ;;
+					24|"")	acdc[i]="pcm_s24le"; abdmeta[i]=", 24 bits" ;;
+					32)	acdc[i]="pcm_s32le"; abdmeta[i]=", 32 bits" ;;
+					*)
+					error "-> Unsupported PCM Bit Depth!"
+					exit 1
+					;;
+				esac
+				;;
+			esac
+			
+			case "${acodec[i]}" in
+				ac3|eac3|truehd|dts|aac|fdk*|mp3|vorbis|libopus|opus|wmav1|wmav2)
+				printf "Track $i: Specify the Audio Bitrate in kbps [${abropts[i]} - default is ${abrdef[i]}]: "
+				read abr[i]
+				test -z "${abr[i]}" && abitrate[i]="${abrdef[i]}k" || abitrate[i]="${abr[i]}k"
+				audbtr[i]="-b:a:${audindex[i]} ${abitrate[i]}"
+				abtrmeta[i]=" @ $(echo "${abitrate[i]}" | sed 's|k||') kbps"
+				case "${acodec[i]}" in
+					dts)
+					printf "Track $i: Use ADPCM Encoding? [y/N]: "
+					read dts_adpcm[i]
+					if [ "${dts_adpcm[i]}" = "y" -o "${dts_adpcm[i]}" = "Y" ]; then
+						audbtr[i]="${audbtr[i]} -dca_adpcm:a:${audindex[i]} true"
+					fi
+					;;
+				esac
+				;;
+			esac
+			
+			case "${acodec[i]}" in
+				ac3|eac3)				chanrange[i]="1-6"; defchan[i]="6" ;;
+				aac|libopus|vorbis|flac|alac|pcm)	chanrange[i]="1-8"; defchan[i]="8" ;;
+				mp3|opus|wmav1|wmav2)			chanrange[i]="1-2"; defchan[i]="2" ;;
+				truehd)					chanrange[i]="2/5/6"; defchan[i]="6" ;;
+				dts)					chanrange[i]="1/2/4/5/6"; defchan[i]="6" ;;
+				fdk*)
+				case "${aacprof[i]}" in
+					aac_he_v2)			true ;;
+					*)				chanrange[i]="1-8"; defchan[i]="8" ;;
+				esac
+				;;
+			esac
+			
+			case "${aacprof[i]}" in
+				aac_he_v2)	ach[i]="2" ;;
+				""|*)
+				printf "Track $i: How many Channels to Encode? [${chanrange[i]} - default is ${defchan[i]}]: "
+				read achan[i]
+				test -z "${achan[i]}" && ach[i]="${defchan[i]}" || ach[i]="${achan[i]}"
+				;;
+			esac
+			case "${acodec[i]}" in
+				ac3|eac3)
+				case "${ach[i]}" in
+					[1-6]) true ;;
+					*)
+					case "${acodec[i]}" in
+						ac3)	error "-> AC-3 supports only 1-6 channels!" ;;
+						eac3)	error "-> E-AC-3 encoder in ffmpeg supports only 1-6 channels!" ;;
+					esac
+					exit 1
+					;;
+				esac
+				;;
+				truehd)
+				for c in $CONFMT $remuxcon; do
+					case "$c" in
+						mp4)
+						case "${ach[i]}" in
+							1|2) true ;;
+							*)
+							error "-> TrueHD audio in MP4 supports only mono/stereo (1/2) channels!"
+							exit 1
+							;;
+						esac
+						;;
+						*)
+						case "${ach[i]}" in
+							2|5|6) true ;;
+							*)
+							error "-> TrueHD encoder in ffmpeg supports only 2, 5 and 6 channels!"
+							exit 1
+							;;
+						esac
+						;;
+					esac
+				done
+				;;
+				dts)
+				case "${ach[i]}" in
+					1|2|4|5|6) true ;;
+					*)
+					error "-> DTS encoder in ffmpeg supports only 1, 2, 4, 5 and 6 channels!"
+					exit 1
+					;;
+				esac
+				;;
+				fdk*)
+				case "${aacprof[i]}" in
+					aac_he_v2) true ;;
+					*)
+					case "${ach[i]}" in
+						[1-6]|8) true ;;
+						*)
+						error "-> libfdk_aac encoder supports only 1, 2, 3, 4, 5, 6 and 8 channels!"
+						exit 1
+						;;
+					esac
+					;;
+				esac
+				;;
+				mp3|opus|wmav1|wmav2)
+				case "${ach[i]}" in
+					1|2) true ;;
+					*)
+					case "${acodec[i]}" in
+						mp3)
+						error "-> MP3 supports only 1-2 channels!"
+						exit 1
+						;;
+						wmav1|wmav2)
+						error "-> WMAv1/WMAv2 support only 1-2 channels!"
+						exit 1
+						;;
+						opus)
+						error "-> Internal Opus encoder supports only 1-2 channels!"
+						exit 1
+						;;
+					esac
+					;;
+				esac
+				;;
+			esac
+			
+			echo
+			brown " Audio Channel Layouts"
+			brown " ~~~~~~~~~~~~~~~~~~~~~"
+			case "${acodec[i]}" in
+				ac3|eac3)
+				echo " 0 -> Mono        4 -> Quad        8 --> 5.0"
+				echo " 1 -> Stereo      5 -> Quad(side)  9 --> 5.0(side)"
+				echo " 2 -> 3.0         6 -> 4.0         10 -> 5.1"
+				echo " 3 -> 3.0(back)   7 -> 4.1         11 -> 5.1(side)"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 10]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+					1)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					2)	achlayout[i]="3.0"; achmeta[i]=" 3.0" ;;
+					3)	achlayout[i]="3.0(back)"; achmeta[i]=" 3.0(back)" ;;
+					4)	achlayout[i]="quad"; achmeta[i]=" Quad" ;;
+					5)	achlayout[i]="quad(side)"; achmeta[i]=" Quad(side)" ;;
+					6)	achlayout[i]="4.0"; achmeta[i]=" 4.0" ;;
+					7)	achlayout[i]="4.1"; achmeta[i]=" 4.1" ;;
+					8)	achlayout[i]="5.0"; achmeta[i]=" 5.0" ;;
+					9)	achlayout[i]="5.0(side)"; achmeta[i]=" 5.0(side)" ;;
+					10|"")	achlayout[i]="5.1"; achmeta[i]=" 5.1" ;;
+					11)	achlayout[i]="5.1(side)"; achmeta[i]=" 5.1(side)" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+				dts)
+				echo " 0 -> Mono         3 -> 5.0(side)"
+				echo " 1 -> Stereo       4 -> 5.1(side)"
+				echo " 2 -> Quad(side)"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 4]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+					1)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					2)	achlayout[i]="quad(side)"; achmeta[i]= "Quad(side)" ;;
+					3)	achlayout[i]="5.0(side)"; achmeta[i]=" 5.0(side)" ;;
+					4|"")	achlayout[i]="5.1(side)"; achmeta[i]=" 5.1(side)" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+				aac)
+				echo " 0 -> Mono       4 -> 4.0         8 --> 5.0(side)  12 -> 7.1(wide)"
+				echo " 1 -> Stereo     5 -> Quad        9 --> 5.1        13 -> 7.1(wide-side)"
+				echo " 2 -> 3.0        6 -> Quad(side)  10 -> 5.1(side)"
+				echo " 3 -> 3.0(back)  7 -> 5.0         11 -> 7.1"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 11]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+					1)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					2)	achlayout[i]="3.0"; achmeta[i]=" 3.0" ;;
+					3)	achlayout[i]="3.0(back)"; achmeta[i]=" 3.0(back)" ;;
+					4)	achlayout[i]="4.0"; achmeta[i]=" 4.0" ;;
+					5)	achlayout[i]="quad"; achmeta[i]=" Quad" ;;
+					6)	achlayout[i]="quad(side)"; achmeta[i]=" Quad(side)" ;;
+					7)	achlayout[i]="5.0"; achmeta[i]=" 5.0" ;;
+					8)	achlayout[i]="5.0(side)"; achmeta[i]=" 5.0(side)" ;;
+					9)	achlayout[i]="5.1"; achmeta[i]=" 5.1" ;;
+					10)	achlayout[i]="5.1(side)"; achmeta[i]=" 5.1(side)" ;;
+					11|"")	achlayout[i]="7.1"; achmeta[i]=" 7.1" ;;
+					12)	achlayout[i]="7.1(wide)"; achmeta[i]=" 7.1(wide)" ;;
+					13)	achlayout[i]="7.1(wide-side)"; achmeta[i]=" 7.1(wide-side)" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+				fdk*)
+				case "${aacprof[i]}" in
+					aac_he_v2)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					*)
+					echo " 0 -> Mono     4 -> 5.0"
+					echo " 1 -> Stereo   5 -> 5.1"
+					echo " 2 -> 3.0      6 -> 7.1"
+					echo " 3 -> 4.0      7 -> 7.1(wide)"
+					echo
+					printf "Track $i: Specify the Audio Channel Layout [default is 6]: "
+					read achanlayout[i]
+					case "${achanlayout[i]}" in
+						0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+						1)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+						2)	achlayout[i]="3.0"; achmeta[i]=" 3.0" ;;
+						3)	achlayout[i]="4.0"; achmeta[i]=" 4.0" ;;
+						4)	achlayout[i]="5.0"; achmeta[i]=" 5.0" ;;
+						5)	achlayout[i]="5.1"; achmeta[i]=" 5.1" ;;
+						6|"")	achlayout[i]="7.1"; achmeta[i]=" 7.1" ;;
+						7)	achlayout[i]="7.1(wide)"; achmeta[i]=" 7.1(wide)" ;;
+						*)
+						error "-> Invalid option!"
+						exit 1
+						;;
+					esac
+					;;
+				esac
+				;;
+				vorbis)
+				echo " 0 -> Mono     4 -> Quad(side)   8 --> 5.1(side)"
+				echo " 1 -> Stereo   5 -> 5.0          9 --> 6.1"
+				echo " 2 -> 3.0      6 -> 5.0(side)    10 -> 7.1"
+				echo " 3 -> Quad     7 -> 5.1"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 10]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+					1)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					2)	achlayout[i]="3.0"; achmeta[i]=" 3.0" ;;
+					3)	achlayout[i]="quad"; achmeta[i]=" Quad" ;;
+					4)	achlayout[i]="quad(side)"; achmeta[i]=" Quad(side)" ;;
+					5)	achlayout[i]="5.0"; achmeta[i]=" 5.0" ;;
+					6)	achlayout[i]="5.0(side)"; achmeta[i]=" 5.0(side)" ;;
+					7)	achlayout[i]="5.1"; achmeta[i]=" 5.1" ;;
+					8)	achlayout[i]="5.1(side)"; achmeta[i]=" 5.1(side)" ;;
+					9)	achlayout[i]="6.1"; achmeta[i]=" 6.1" ;;
+					10|"")	achlayout[i]="7.1"; achmeta[i]=" 7.1" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+				libopus)
+				echo " 0 -> Mono     4 -> 5.0   8 -> 7.1"
+				echo " 1 -> Stereo   5 -> 5.1"
+				echo " 2 -> 3.0      6 -> 6.1"
+				echo " 3 -> Quad     7 -> 7.0"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 8]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+					1)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					2)	achlayout[i]="3.0"; achmeta[i]=" 3.0" ;;
+					3)	achlayout[i]="quad"; achmeta[i]=" Quad" ;;
+					4)	achlayout[i]="5.0"; achmeta[i]=" 5.0" ;;
+					5)	achlayout[i]="5.1"; achmeta[i]=" 5.1" ;;
+					6)	achlayout[i]="6.1"; achmeta[i]=" 6.1" ;;
+					7)	achlayout[i]="7.0"; achmeta[i]=" 7.0" ;;
+					8|"")	achlayout[i]="7.1"; achmeta[i]=" 7.1" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+				mp3|opus|wmav1|wmav2)
+				echo " 0 -> Mono"
+				echo " 1 -> Stereo"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 1]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+					1|"")	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+				truehd)
+				echo " 0 -> Stereo"
+				echo " 1 -> 5.0"
+				echo " 2 -> 5.1"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 2]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					1)	achlayout[i]="5.0"; achmeta[i]=" 5.0" ;;
+					2|"")	achlayout[i]="5.1"; achmeta[i]=" 5.1" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+				flac)
+				echo " 0 -> Mono     4 -> Quad(side)   8 --> 5.1(side)    12 -> 7.0          16 -> 7.1(wide-side)"
+				echo " 1 -> Stereo   5 -> 5.0          9 --> 6.1          13 -> 7.0(front)"
+				echo " 2 -> 3.0      6 -> 5.0(side)    10 -> 6.1(front)   14 -> 7.1"
+				echo " 3 -> Quad     7 -> 5.1          11 -> 6.1(back)    15 -> 7.1(wide)"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 14]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+					1)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					2)	achlayout[i]="3.0"; achmeta[i]=" 3.0" ;;
+					3)	achlayout[i]="quad"; achmeta[i]=" Quad" ;;
+					4)	achlayout[i]="quad(side)"; achmeta[i]=" Quad(side)" ;;
+					5)	achlayout[i]="5.0"; achmeta[i]=" 5.0" ;;
+					6)	achlayout[i]="5.0(side)"; achmeta[i]=" 5.0(side)" ;;
+					7)	achlayout[i]="5.1"; achmeta[i]=" 5.1" ;;
+					8)	achlayout[i]="5.1(side)"; achmeta[i]=" 5.1(side)" ;;
+					9)	achlayout[i]="6.1"; achmeta[i]=" 6.1" ;;
+					10)	achlayout[i]="6.1(front)"; achmeta[i]=" 6.1(front)" ;;
+					11)	achlayout[i]="6.1(back)"; achmeta[i]=" 6.1(back)" ;;
+					12)	achlayout[i]="7.0"; achmeta[i]=" 7.0" ;;
+					13)	achlayout[i]="7.0(front)"; achmeta[i]=" 7.0(front)" ;;
+					14|"")	achlayout[i]="7.1"; achmeta[i]=" 7.1" ;;
+					15)	achlayout[i]="7.1(wide)"; achmeta[i]=" 7.1(wide)" ;;
+					16)	achlayout[i]="7.1(wide-side)"; achmeta[i]=" 7.1(wide-side)" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+				alac)
+				echo " 0 -> Mono     4 -> 5.0"
+				echo " 1 -> Stereo   5 -> 5.1"
+				echo " 2 -> 3.0      6 -> 6.1(back)"
+				echo " 3 -> 4.0      7 -> 7.1(wide)"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 7]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+					1)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					2)	achlayout[i]="3.0"; achmeta[i]=" 3.0" ;;
+					3)	achlayout[i]="4.0"; achmeta[i]=" 4.0" ;;
+					4)	achlayout[i]="5.0"; achmeta[i]=" 5.0" ;;
+					5)	achlayout[i]="5.1"; achmeta[i]=" 5.1" ;;
+					6)	achlayout[i]="6.1(back)"; achmeta[i]=" 6.1(back)" ;;
+					7|"")	achlayout[i]="7.1(wide)"; achmeta[i]=" 7.1(wide)" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+				pcm)
+				echo " 0 -> Mono    4 -> Quad       8 --> 5.1         12 -> 6.1         16 -> 7.0(front)"
+				echo " 1 -> Stereo  5 -> Quad(side) 9 --> 5.1(side)   13 -> 6.1(front)  17 -> 7.1"
+				echo " 2 -> 2.1     6 -> 5.0        10 -> 6.0         14 -> 6.1(back)   18 -> 7.1(wide)"
+				echo " 3 -> 3.0     7 -> 5.0(side)  11 -> 6.0(front)  15 -> 7.0         19 -> 7.1(wide-side)"
+				echo
+				printf "Track $i: Specify the Audio Channel Layout [default is 17]: "
+				read achanlayout[i]
+				case "${achanlayout[i]}" in
+					0)	achlayout[i]="mono"; achmeta[i]=" Mono" ;;
+					1)	achlayout[i]="stereo"; achmeta[i]=" Stereo" ;;
+					2)	achlayout[i]="2.1"; achmeta[i]=" 2.1" ;;
+					3)	achlayout[i]="3.0"; achmeta[i]=" 3.0" ;;
+					4)	achlayout[i]="quad"; achmeta[i]=" Quad" ;;
+					5)	achlayout[i]="quad(side)"; achmeta[i]=" Quad(side)" ;;
+					6)	achlayout[i]="5.0"; achmeta[i]=" 5.0" ;;
+					7)	achlayout[i]="5.0(side)"; achmeta[i]=" 5.0(side)" ;;
+					8)	achlayout[i]="5.1"; achmeta[i]=" 5.1" ;;
+					9)	achlayout[i]="5.1(side)"; achmeta[i]=" 5.1(side)" ;;
+					10)	achlayout[i]="6.0"; achmeta[i]=" 6.0" ;;
+					11)	achlayout[i]="6.0(front)"; achmeta[i]=" 6.0(front)" ;;
+					12)	achlayout[i]="6.1"; achmeta[i]=" 6.1" ;;
+					13)	achlayout[i]="6.1(front)"; achmeta[i]=" 6.1(front)" ;;
+					14)	achlayout[i]="6.1(back)"; achmeta[i]=" 6.1(back)" ;;
+					15)	achlayout[i]="7.0"; achmeta[i]=" 7.0" ;;
+					16)	achlayout[i]="7.0(front)"; achmeta[i]=" 7.0(front)" ;;
+					17|"")	achlayout[i]="7.1"; achmeta[i]=" 7.1" ;;
+					18)	achlayout[i]="7.1(wide)"; achmeta[i]=" 7.1(wide)" ;;
+					19)	achlayout[i]="7.1(wide-side)"; achmeta[i]=" 7.1(wide-side)" ;;
+					*)
+					error "-> Invalid option!"
+					exit 1
+					;;
+				esac
+				;;
+			esac
+			
+			case "${acodec[i]}" in
+				ac3|eac3)
+				printf "Track $i: Specify the Dialog Level Normalization in dB [-31 to -1 - default is -31]: "
+				read adn[i]
+				test -z "${adn[i]}" && auddialnorm[i]="-dialnorm:a:${audindex[i]} -31" || auddialnorm[i]="-dialnorm:a:${audindex[i]} ${adn[i]}"
+				;;
+			esac
+			
+			if [ "$AUD_NORMALIZE" = "y" ]; then
+				printf "Track $i: Normalize the Audio Volume? [y/N]: "
+				read anorm[i]
+				if [ "${anorm[i]}" = "y" -o "${anorm[i]}" = "Y" ]; then
+					anormalize[i]="dynaudnorm=n=0,"
+				fi
+			fi
+			
+			if [ "$AUD_VOLUME" = "y" ]; then
+				printf "Track $i: Set the Audio Volume? [y/N]: "
+				read setavol[i]
+				if [ "${setavol[i]}" = "y" -o "${setavol[i]}" = "Y" ]; then
+					printf "Track $i: Specify the Audio Volume value in dB [-100-100 - default is 4.0]: "
+					read avol[i]
+					test -z "${avol[i]}" && audvol[i]="4" || audvol[i]="${avol[i]}"
+					avolume[i]="volume=${audvol[i]}dB,"
+				fi
+			fi
+			
+			if [ "$AUD_RESAMPLE" = "y" ]; then
+				printf "Track $i: Resample the Audio? [y/N]: "
+				read ares[i]
+				if [ "${ares[i]}" = "y" -o "${ares[i]}" = "Y" ]; then
+					echo
+					green "-> Track $i: detecting audio sample rate..."
+					sleep 1
+					GETAUDSR[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=sample_rate -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+					if [ ! -z "${GETAUDSR[i]}" ]; then
+						green "-> Track $i: detected ${GETAUDSR[i]} Hz"
+					else
+						error "-> Track $i: could not detect the audio sample rate!"
+					fi
+					echo
+					brown " Supported Sample Rates"
+					brown " ~~~~~~~~~~~~~~~~~~~~~~"
+					case "${acodec[i]}" in
+						opus)
+						echo " 0 -> 48000 Hz"
+						echo
+						printf "Track $i: Specify the Audio Sample Rate option [default is 0]: "
+						read arate[i]
+						case "${arate[i]}" in
+							0|"")	audhz[i]="48000" ;;
+							*)
+							error "-> Invalid option!"
+							exit 1
+							;;
+						esac
+						;;
+						ac3|eac3)
+						echo " 0 -> 32000 Hz"
+						echo " 1 -> 44100 Hz"
+						echo " 2 -> 48000 Hz"
+						echo
+						printf "Track $i: Specify the Audio Sample Rate option [default is 2]: "
+						read arate[i]
+						case "${arate[i]}" in
+							0)	audhz[i]="32000" ;;
+							1)	audhz[i]="44100" ;;
+							2|"")	audhz[i]="48000" ;;
+							*)
+							error "-> Invalid option!"
+							exit 1
+							;;
+						esac
+						;;
+						mp3|dts|wmav1|wmav2)
+						echo " 0 -> 8000 Hz     5 -> 24000 Hz"
+						echo " 1 -> 11025 Hz    6 -> 32000 Hz"
+						echo " 2 -> 12000 Hz    7 -> 44100 Hz"
+						echo " 3 -> 16000 Hz    8 -> 48000 Hz"
+						echo " 4 -> 22050 Hz"
+						echo
+						printf "Track $i: Specify the Audio Sample Rate option [default is 8]: "
+						read arate[i]
+						case "${arate[i]}" in
+							0)	audhz[i]="8000" ;;
+							1)	audhz[i]="11025" ;;
+							2)	audhz[i]="12000" ;;
+							3)	audhz[i]="16000" ;;
+							4)	audhz[i]="22050" ;;
+							5)	audhz[i]="24000" ;;
+							6)	audhz[i]="32000" ;;
+							7)	audhz[i]="44100" ;;
+							8|"")	audhz[i]="48000" ;;
+							*)
+							error "-> Invalid option!"
+							exit 1
+							;;
+						esac
+						;;
+						aac|fdk*)
+						echo " 0 -> 7350 Hz     5 -> 22050 Hz    10 -> 64000 Hz"
+						echo " 1 -> 8000 Hz     6 -> 24000 Hz    11 -> 88200 Hz"
+						echo " 2 -> 11025 Hz    7 -> 32000 Hz    12 -> 96000 Hz"
+						echo " 3 -> 12000 Hz    8 -> 44100 Hz"
+						echo " 4 -> 16000 Hz    9 -> 48000 Hz"
+						echo
+						printf "Track $i: Specify the Audio Sample Rate option [default is 9]: "
+						read arate[i]
+						case "${arate[i]}" in
+							0)	audhz[i]="7350" ;;
+							1)	audhz[i]="8000" ;;
+							2)	audhz[i]="11025" ;;
+							3)	audhz[i]="12000" ;;
+							4)	audhz[i]="16000" ;;
+							5)	audhz[i]="22050" ;;
+							6)	audhz[i]="24000" ;;
+							7)	audhz[i]="32000" ;;
+							8)	audhz[i]="44100" ;;
+							9|"")	audhz[i]="48000" ;;
+							10)	audhz[i]="64000" ;;
+							11)	audhz[i]="88200" ;;
+							12)	audhz[i]="96000" ;;
+							*)
+							error "-> Invalid option!"
+							exit 1
+							;;
+						esac
+						;;
+						flac)
+						echo " 0 -> 8000 Hz      4 -> 32000 Hz     8 --> 96000 Hz"
+						echo " 1 -> 16000 Hz     5 -> 44100 Hz     9 --> 176400 Hz"
+						echo " 2 -> 22050 Hz     6 -> 48000 Hz     10 -> 192000 Hz"
+						echo " 3 -> 24000 Hz     7 -> 88200 Hz"
+						echo
+						printf "Track $i: Specify the Audio Sample Rate option [default is 6]: "
+						read arate[i]
+						case "${arate[i]}" in
+							0)	audhz[i]="8000" ;;
+							1)	audhz[i]="16000" ;;
+							2)	audhz[i]="22050" ;;
+							3)	audhz[i]="24000" ;;
+							4)	audhz[i]="32000" ;;
+							5)	audhz[i]="44100" ;;
+							6|"")	audhz[i]="48000" ;;
+							7)	audhz[i]="88200" ;;
+							8)	audhz[i]="96000" ;;
+							9)	audhz[i]="176400" ;;
+							10)	audhz[i]="192000" ;;
+							*)
+							error "-> Invalid option!"
+							exit 1
+							;;
+						esac
+						;;
+						libopus)
+						echo " 0 -> 8000 Hz"
+						echo " 1 -> 12000 Hz"
+						echo " 2 -> 16000 Hz"
+						echo " 3 -> 24000 Hz "
+						echo " 4 -> 48000 Hz"
+						echo
+						printf "Track $i: Specify the Audio Sample Rate option [default is 4]: "
+						read arate[i]
+						case "${arate[i]}" in
+							0)	audhz[i]="8000" ;;
+							1)	audhz[i]="12000" ;;
+							2)	audhz[i]="16000" ;;
+							3)	audhz[i]="24000" ;;
+							4|"")	audhz[i]="48000" ;;
+							*)
+							error "-> Invalid option!"
+							exit 1
+							;;
+						esac
+						;;
+						truehd)
+						echo " 0 -> 44100 Hz     3 -> 96000 Hz "
+						echo " 1 -> 48000 Hz     4 -> 176400 Hz"
+						echo " 2 -> 88200 Hz     5 -> 192000 Hz"
+						echo
+						printf "Track $i: Specify the Audio Sample Rate option [default is 1]: "
+						read arate[i]
+						case "${arate[i]}" in
+							0)	audhz[i]="44100" ;;
+							1|"")	audhz[i]="48000" ;;
+							2)	audhz[i]="88200" ;;
+							3)	audhz[i]="96000" ;;
+							4)	audhz[i]="176400" ;;
+							5)	audhz[i]="192000" ;;
+							*)
+							error "-> Invalid option!"
+							exit 1
+							;;
+						esac
+						;;
+						vorbis|pcm|alac)
+						echo " 0 -> 8000 Hz     5 -> 24000 Hz    10 -> 88200 Hz"
+						echo " 1 -> 11025 Hz    6 -> 32000 Hz    11 -> 96000 Hz"
+						echo " 2 -> 12000 Hz    7 -> 44100 Hz    12 -> 176400 Hz"
+						echo " 3 -> 16000 Hz    8 -> 48000 Hz    13 -> 192000 Hz"
+						echo " 4 -> 22050 Hz    9 -> 64000 Hz"
+						echo
+						printf "Track $i: Specify the Audio Sample Rate option [default is 8]: "
+						read arate[i]
+						case "${arate[i]}" in
+							0)	audhz[i]="8000" ;;
+							1)	audhz[i]="11025" ;;
+							2)	audhz[i]="12000" ;;
+							3)	audhz[i]="16000" ;;
+							4)	audhz[i]="22050" ;;
+							5)	audhz[i]="24000" ;;
+							6)	audhz[i]="32000" ;;
+							7)	audhz[i]="44100" ;;
+							8|"")	audhz[i]="48000" ;;
+							9)	audhz[i]="64000" ;;
+							10)	audhz[i]="88200" ;;
+							11)	audhz[i]="96000" ;;
+							12)	audhz[i]="176400" ;;
+							13)	audhz[i]="192000" ;;
+							*)
+							error "-> Invalid option!"
+							exit 1
+							;;
+						esac
+						;;
+					esac
+					echo
+					brown " Resampling Filter Types"
+					brown " ~~~~~~~~~~~~~~~~~~~~~~~"
+					echo " 0 -> Cubic"
+					echo " 1 -> Blackman-Nuttall windowed sinc"
+					echo " 2 -> Kaiser windowed sinc"
+					echo
+					printf "Track $i: Specify the Resampling Filter Type [default is 2]: "
+					read arft[i]
+					case "${arft[i]}" in
+						0)	audfiltype[i]=":filter_type=cubic" ;;
+						1)	audfiltype[i]=":filter_type=blackman_nuttall" ;;
+						2|"")	audfiltype[i]=":filter_type=kaiser" ;;
+						*)
+						error "-> Invalid option!"
+						exit 1
+						;;
+					esac
+					case "${ach[i]}" in
+						2)
+						printf "Track $i: Specify the Matrixed Stereo Encoding [none/dolby/dplii - default is none]: "
+						read amse[i]
+						test -z "${amse[i]}" && audmatrix[i]=":matrix_encoding=none" || audmatrix[i]=":matrix_encoding=${amse[i]}"
+						;;
+					esac
+					aresample[i]="aresample=${audhz[i]}${audfiltype[i]}${audmatrix[i]},"
+					ahzmeta[i]=", ${audhz[i]} Hz"
+				fi
+			fi
+			
+			if [ -z "${audhz[i]}" ]; then
+				GETAUDSR[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=sample_rate -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+				case "${GETAUDSR[i]}" in
+					[1-9]*)	ahzmeta[i]=", ${GETAUDSR[i]} Hz" ;;
+				esac
+			fi
+			
+			audmeta[i]="-metadata:s:a:${audindex[i]} title=\"${acdcmeta[i]}${achmeta[i]}${abtrmeta[i]}${ahzmeta[i]}${abdmeta[i]}\""
+			audchan[i]="-ac:a:${audindex[i]} ${ach[i]} -channel_layout:a:${audindex[i]} \"${achlayout[i]}\""
+			
+			afilters[i]="$(echo "${aresample[i]}${anormalize[i]}${avolume[i]}$atempo" | sed 's|,$||')"
+			
+			test ! -z "${afilters[i]}" && audfilters[i]="-filter:a:${audindex[i]} ${afilters[i]}"
+		else
+			GETAUDCDC[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+			
+			if [ ! -z "${GETAUDCDC[i]}" ]; then
+				GETAUDBTR[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+				GETAUDBD[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=bits_per_raw_sample -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+				GETAUDSR[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=sample_rate -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+				GETAUDCL[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=channel_layout -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+					
+				get_audio_profile_func() {
+					GETAUDPROF[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=profile -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+				}
+					
+				case "${GETAUDCDC[i]}" in
+					ac3)	GETAUDCDC[i]="AC-3" ;;
+					eac3)	GETAUDCDC[i]="E-AC-3" ;;
+					truehd)	GETAUDCDC[i]="TrueHD" ;;
+					dts)
+					get_audio_profile_func
+					case "${GETAUDPROF[i]}" in
+						"DTS-HD MA")	GETAUDCDC[i]="DTS-HD MA" ;;
+						"DTS Express")	GETAUDCDC[i]="DTS Express" ;;
+						"DTS-HD HRA")	GETAUDCDC[i]="DTS-HD HR" ;;
+						DTS-ES)		GETAUDCDC[i]="DTS-ES" ;;
+						*)		GETAUDCDC[i]="DTS" ;;
+					esac
+					;;
+					vorbis)	GETAUDCDC[i]="Vorbis" ;;
+					aac)
+					get_audio_profile_func
+					case "${GETAUDPROF[i]}" in
+						LC|LC-AAC)		GETAUDCDC[i]="LC-AAC" ;;
+						HE|HE-AAC)		GETAUDCDC[i]="HE-AAC" ;;
+						HEv2|HE-AACv2)		GETAUDCDC[i]="HE-AACv2" ;;
+						LD|LD-AAC)		GETAUDCDC[i]="LD-AAC" ;;
+						""|N/A|unknown)		GETAUDCDC[i]="AAC" ;;
+					esac
+					;;
+					mp3)	GETAUDCDC[i]="MP3" ;;
+					mp2)	GETAUDCDC[i]="MP2" ;;
+					wmav1)	GETAUDCDC[i]="WMAv1" ;;
+					wmav2)	GETAUDCDC[i]="WMAv2" ;;
+					opus)	GETAUDCDC[i]="Opus" ;;
+					pcm*)	GETAUDCDC[i]="PCM" ;;
+					lpcm*)	GETAUDCDC[i]="LPCM" ;;
+					flac)	GETAUDCDC[i]="FLAC" ;;
+					alac)	GETAUDCDC[i]="ALAC" ;;
+					*)	GETAUDCDC[i]="$(echo "${GETAUDCDC[i]}" | tr '[a-z]' '[A-Z]')" ;;
+				esac
+				case "${GETAUDCL[i]}" in
+					[1-9]*|mono|stereo|unknown|N/A|"")
+					case "${GETAUDCL[i]}" in
+						mono)	achmeta[i]=" Mono" ;;
+						stereo)	achmeta[i]=" Stereo" ;;
+						unknown|N/A|"")
+						GETAUDCH[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=channels -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+						case "${GETAUDCH[i]}" in
+							1)	achmeta[i]=" Mono" ;;
+							2)	achmeta[i]=" Stereo" ;;
+							3)	achmeta[i]=" 2.1/3.0" ;;
+							4)	achmeta[i]=" Quad" ;;
+							5)	achmeta[i]=" 4.1/5.0" ;;
+							6)	achmeta[i]=" 5.1/6.0" ;;
+							7)	achmeta[i]=" 6.1/7.0" ;;
+							8)	achmeta[i]=" 7.1" ;;
+						esac
+						;;
+						*)	achmeta[i]=" ${GETAUDCL[i]}" ;;
+					esac
+					;;
+				esac
+				case "${GETAUDBTR[i]}" in
+					[1-9]*)	abtrmeta[i]=" @ $(($(echo "${GETAUDBTR[i]}")/1000)) kbps" ;;
+				esac
+				case "${GETAUDBD[i]}" in
+					[1-9]*)	abdmeta[i]=", ${GETAUDBD[i]} bits" ;;
+				esac
+				case "${GETAUDSR[i]}" in
+					[1-9]*)	asrmeta[i]=", ${GETAUDSR[i]} Hz" ;;
+				esac
+				audmeta[i]="-metadata:s:a:${audindex[i]} title=\"${GETAUDCDC[i]}${achmeta[i]}${abtrmeta[i]}${asrmeta[i]}${abdmeta[i]}\""
+			fi
+		fi
+		
+		if [ -z "$noaudmeta" ]; then
+			audparams[i]="${audmap[i]} -c:a:${audindex[i]} ${acdc[i]} ${audprofile[i]} ${audcomplevel[i]} ${audbtr[i]} ${audchan[i]} ${audbd[i]} ${auddialnorm[i]} ${audfilters[i]} ${audlang[i]} ${audmeta[i]} ${auddispo[i]}"
+		else
+			audparams[i]="${audmap[i]} -c:a:${audindex[i]} ${acdc[i]} ${audprofile[i]} ${audcomplevel[i]} ${audbtr[i]} ${audchan[i]} ${audbd[i]} ${auddialnorm[i]} ${audfilters[i]} ${audlang[i]} ${auddispo[i]}"
+		fi
+
+	done
+fi
+
+if [ ! -z "$skipsetpts" ]; then
+	echo
+	error "-> FPS conversion with the 'setpts' and 'atempo' filters has"
+	error "   been disabled as it is incompatible with audio stream copy!"
+fi
+
+case "$encmode" in
+	[1-2]p)
+	# Haven't found a reliable way to make it work with
+	# FLAC, ALAC and PCM audio so just skip this if one
+	# of these audio codecs is chosen. Patch welcome
+	# In case of TrueHD, while we support setting the
+	# bitrate, that codec is variable in nature and
+	# the actual bitrate can wildly fluctuate, which
+	# will result in miscalculation for the target
+	# size by an unknown amount
+	if [ -z "$skiptfs" ]; then
+		echo
+		printf "Set a Target File Size? [y/N]: "
+		read tfs
+		if [ "$tfs" = "y" -o "$tfs" = "Y" ]; then
+			printf "Specify the Target File Size in MiB [default is 5120]: "
+			read tsize
+			test -z "$tsize" && target="5120" || target="$tsize"
+			video_length_func file
+			if [ -z "$VLENGTH" -o "$VLENGTH" = "N/A" ]; then
+				echo
+				error "-> Could not detect the video length!"
+				echo
+				printf "Specify the Video Length in seconds [no default!]: "
+				read vls
+				if [ -z "$vls" ]; then
+					echo
+					error "-> No value given!"
+					error "-> Skipping bitrate calc!"
+					skipbitcalc="1"
+				else
+					VLENGHT="$vls"
+				fi
+			fi
+			if [ -z "$skipbitcalc" ]; then
+				# Audio copy, get bitrate
+				for i in $(eval echo "{1..$ATRACKS}"); do
+					if [ "${acodec[i]}" = "copy" ]; then
+						abtr[i]="$($FFPROBE -i "$input" -v quiet -select_streams a:${aidx[i]} -show_entries stream=bit_rate -of default=noprint_wrappers=1:nokey=1 | tail -1)"
+						case "${abtr[i]}" in
+							[1-9]*)	abitrate[i]="$((${abtr[i]}/1000))" ;;
+							""|*)	abitrate[i]="0" ;;
+						esac
+					fi
+				done
+				AUDBTR="$(($(echo "${abitrate[*]}" | sed 's|k||g; s| |+|g')))"
+				VBITRATE="$((($target*8192/$VLENGTH)-$AUDBTR))"
+				echo
+				green "-> Video length is: $(($VLENGTH/60)) minutes or $VLENGTH seconds"
+				green "-> Total audio bitrate is: $AUDBTR kbps"
+				green "-> Estimated video bitrate for $target MiB: $VBITRATE kbps"
+				echo
+				printf "Specify the Video Bitrate in kbps [default is $VBITRATE]: "
+				read vb
+				test -z "$vb" && vbitrate="$VBITRATE" || vbitrate="$vb"
+			fi
+		fi
+	fi
+	;;
+esac
+
+# Small counter :)
+counter_func() {
+	for i in 5 4 3 2 1 0; do
+		sleep 1 && echo -n "$i "
+	done
+}
+
+# Set counter color
+color_func() {
+	BLUE="\033[01;34m"
+	NORMAL="\e[0;0m"
+	case "$1" in
+		blue) printf "$BLUE" ;;
+		normal) echo -ne "$NORMAL" ;;
+	esac
+}
+
+case "$encmode" in
+	1p)	pass="1-pass" ;;
+	2p)	pass="2-pass" ;;
+	cq|"")	pass="CQ"; encmode="cq" ;;
+esac
+
+echo
+green "-> Starting to encode in $pass mode..."
+test -z "$batchmode" && OUT="$OUTPUT" || OUT="'$(dirname "$OUTPUT")' directory"
+green "-> Output to: $OUT"
+echo
+color_func blue && printf "Starting to encode in: " && counter_func
+color_func normal && echo
+
+
+if [ -z "$batchmode" ]; then
+	OUTFILE="$(dirname "$OUTPUT")/$(basename "${OUTPUT%.*}" | sed 's| |_|g').sh"
+else
+	OUTFILE="$(dirname "$OUTPUT")/$(basename $0)_batch$$.sh"
+	input="\$i"
+fi
+
+test "$METADATA" = "n" && METADATA="-map_metadata -1" || METADATA="-map_metadata 0"
+
+test "$CHAPS" = "n" && CHAPS="-map_chapters -1" || CHAPS="-map_chapters 0"
+
+vidfilters="$(echo "$deinterlace$detelecine$tonemap$crop$deblock$denoise$scale$noise$colorspace$unsharp$eq$rotate$pixformat$setpts$fps$framestep$subtitles" | sed 's|,$||')"
+
+test ! -z "$vidfilters" && vfilters="-vf $vidfilters"
+
+XVIDPARAMS="$interlaced $XVIDPARAMS $threads"
+
+test ! -z "$COMMENT" && METACOMMENT="-metadata comment=\"$COMMENT\""
+
+encoder_func() {
+	VIDOPTS="${EXTSUBS[*]} $vidmap -disposition:v:0 default -max_muxing_queue_size 9999 $movflags $aspect $ofps $METADATA $CHAPS $METATITLE $METAGENRE $METAYEAR $METACOMMENT $ffvbv_maxrate $ffvbv_bufsize $vfilters $coloroptions"
+	case "$1" in
+		1p|cq)
+		test "$encmode" = "1p" && passone="-b:v $vbitrate" || passone="-q:v $CQ"
+		OPTS1="${audparams[*]} $strict $subparams $MKVCOVER \"$OUTPUT\""
+		;;
+		2p)
+		passone="-pass 1 -b:v $vbitrate -passlogfile \"${OUTFILE%.*}.log\""
+		passtwo="-pass 2 -b:v $vbitrate -passlogfile \"${OUTFILE%.*}.log\""
+		OPTS1="-an -f null -y /dev/null"
+		OPTS2="${audparams[*]} $strict $subparams $MKVCOVER \"$OUTPUT\""
+		;;
+	esac
+	echo "nice -n $NICE $FFMPEG $verbose -i \"$input\" $VIDOPTS -c:v libxvid $passone $XVIDPARAMS $OPTS1"
+	case "$1" in
+		2p)
+		echo
+		echo "nice -n $NICE $FFMPEG $verbose -i \"$input\" $VIDOPTS -c:v libxvid $passtwo $XVIDPARAMS $OPTS2"
+		;;
+	esac
+}
+
+echo "#!/usr/bin/env bash" > "$OUTFILE"
+echo "" >> "$OUTFILE"
+echo "green() { echo -e \"\e[1;32m\$1\e[0;39;49m\"; }" >> "$OUTFILE"
+echo "red() { echo -e \"\e[1;31m\$1\e[0;39;49m\"; }" >> "$OUTFILE"
+echo "" >> "$OUTFILE"
+echo "test ! -d \"$(dirname "$OUTFILE")\" && mkdir -p \"$(dirname "$OUTFILE")\"" >> "$OUTFILE"
+echo "" >> "$OUTFILE"
+if [ ! -z "$batchmode" ]; then
+	echo "$CHDIR" >> "$OUTFILE"
+	echo "" >> "$OUTFILE"
+	echo "$FORLOOP_START" >> "$OUTFILE"
+	if [ "$LOG" = "y" ]; then
+		echo "" >> "$OUTFILE"
+		verbose_func >> "$OUTFILE"
+		echo "" >> "$OUTFILE"
+	fi
+	echo "$CHKFILE_START" >> "$OUTFILE"
+	if [ "$autocrop" = "y" -o "$autocrop" = "Y" ]; then
+		echo "" >> "$OUTFILE"
+		echo "echo" >> "$OUTFILE"
+		echo "green \"-> Detecting crop values for '\$(basename \"\$i\")'...\"" >> "$OUTFILE"
+		video_length_func batch >> "$OUTFILE"
+		echo "CROPVAL=\"$CROPVAL\"" >> "$OUTFILE"
+		echo "green \"-> Found \$CROPVAL\"" >> "$OUTFILE"
+		echo "echo" >> "$OUTFILE"
+		echo "sleep 3" >> "$OUTFILE"
+		echo "" >> "$OUTFILE"
+	fi
+fi
+encoder_func $encmode >> "$OUTFILE"
+echo "" >> "$OUTFILE"
+if [ ! -z "$remuxcon" ]; then
+	for i in $remuxcon; do
+		echo "" >> "$OUTFILE"
+		echo "echo" >> "$OUTFILE"
+		echo "green \"-> Remuxing to $i...\"" >> "$OUTFILE"
+		case "$i" in
+			mp4|m4v|mov)	movflags2="-movflags +faststart+frag_keyframe+use_metadata_tags" ;;
+			*)		movflags2="" ;;
+		esac
+		case "$i" in
+			wmv)	vflags="-fflags +genpts"; color=""; MKVCOVER2="" ;;
+			mov)	vflags=""; color="$colr"; MKVCOVER2="" ;;
+			mkv)
+			vflags=""
+			color=""
+			if [ ! -z "$MP4COVER" ]; then
+				MKVCOVER2="-attach \"$(readlink -e "$cover")\" -metadata:s:t mimetype=\"image/$img\""
+			fi
+			;;
+			*)	vflags=""; color=""; MKVCOVER2="" ;;
+		esac
+		if [ "$subparams" != "-sn" ]; then
+			case "$i" in
+				mp4|m4v|mov)	suboption="-c:s mov_text" ;;
+				avi|wmv)	suboption="-sn" ;;
+				*)
+				case "$(basename "${OUTPUT##*.}")" in
+					mp4|m4v|mov)	suboption="-c:s srt" ;;
+					*)		suboption="-c:s copy" ;;
+				esac
+				;;
+			esac
+		fi
+		echo "$FFMPEG $vflags -i \"$OUTPUT\" -map 0 -c:v copy -c:a copy -max_muxing_queue_size 9999 $suboption $strict $movflags2 $coloroptions $MKVCOVER2 $METADATA $CHAPS $METATITLE $METAGENRE $METAYEAR $METACOMMENT ${audmeta[*]} ${audlang[*]} ${sublang[*]} ${sublng[*]} \"${OUTPUT%.*}.$i\" >/dev/null 2>&1" >> "$OUTFILE"
+		echo "test \"\$?\" = \"0\" && green \"-> Done\" || red \"-> Failed!\"" >> "$OUTFILE"
+		case "$i" in
+			mp4|m4v|mov)
+			if [ ! -z "$MKVCOVER" -o ! -z "$MP4COVER" ]; then
+				echo "" >> "$OUTFILE"
+				echo "echo" >> "$OUTFILE"
+				echo "green \"-> Adding cover image to $i...\"" >> "$OUTFILE"
+				echo "$MP4BOX -add \"${OUTPUT%.*}.$i\"$color -itags cover=\"$(readlink -e "$cover")\":name=\"$(basename "${OUTPUT%.*}")\":genre=\"$genre\":created=\"$year\":composer=\"$director\":artist=\"$cast\":comment=\"$COMMENT\" -tmp \"$(dirname "$OUTPUT")\" -mpeg4 -new \"${OUTPUT%.*}_COVER_$$.$i\" >/dev/null 2>&1" >> "$OUTFILE"
+				echo "RET=\$?" >> "$OUTFILE"
+				echo "test \"\$RET\" = \"0\" && green \"-> Done\" || red \"-> Failed!\"" >> "$OUTFILE"
+				echo "if [ \"\$RET\" = \"0\" ]; then" >> "$OUTFILE"
+				echo "mv -f \"${OUTPUT%.*}_COVER_$$.$i\" \"${OUTPUT%.*}.$i\"" >> "$OUTFILE"
+				echo "fi" >> "$OUTFILE"
+			fi
+			;;
+		esac
+	done
+	echo "echo" >> "$OUTFILE"
+fi
+case "$CONFMT" in
+	mp4|m4v|mov)
+	if [ ! -z "$MP4COVER" ]; then
+		case "$CONFMT" in
+			mov)	color="$colr" ;;
+		esac
+		echo "echo" >> "$OUTFILE"
+		echo "green \"-> Adding cover image to $CONFMT...\"" >> "$OUTFILE"
+		echo "$MP4BOX -add \"$OUTPUT\"$color -itags cover=\"$(readlink -e "$cover")\":name=\"$(basename "${OUTPUT%.*}")\":genre=\"$genre\":created=\"$year\":composer=\"$director\":artist=\"$cast\":comment=\"$COMMENT\" -tmp \"$(dirname "$OUTPUT")\" -mpeg4 -new \"${OUTPUT%.*}_COVER_$$.$CONFMT\" >/dev/null 2>&1" >> "$OUTFILE"
+		echo "RET=\$?" >> "$OUTFILE"
+		echo "test \"\$RET\" = \"0\" && green \"-> Done\" || red \"-> Failed!\"" >> "$OUTFILE"
+		echo "if [ \"\$RET\" = \"0\" ]; then" >> "$OUTFILE"
+		echo "mv -f \"${OUTPUT%.*}_COVER_$$.$CONFMT\" \"${OUTPUT%.*}.$CONFMT\"" >> "$OUTFILE"
+		echo "fi" >> "$OUTFILE"
+		echo "echo" >> "$OUTFILE"
+		echo "" >> "$OUTFILE"
+	fi
+	;;
+esac
+if [ ! -z "$batchmode" ]; then
+	echo "$CHKFILE_END" >> "$OUTFILE"
+	echo "$FORLOOP_END" >> "$OUTFILE"
+fi
+chmod +x "$OUTFILE"
+
+source "$OUTFILE"
