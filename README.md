@@ -1,5 +1,5 @@
 # ffxvid
-Mirror of https://ffxvid.sourceforge.io
+Mirror of [ffxvid.sourceforge.io](https://ffxvid.sourceforge.io)
 
 `ffxvid` is a small yet quite capable Bash shell script written for the GNU/Linux and BSD operating systems that makes it easy to encode video files to MPEG-4 Part 2/Xvid video using the FFmpeg encoder and the `libxvid` library.
 
@@ -50,7 +50,7 @@ The script is primarily targeted at encoding of full-length feature films and fi
 ### Other stuff
 
 * Support for the following output container formats: AVI, WMV, MP4, M4V, MOV, MKV.
-* Configuration file-based. Config file is stored in the user's home directory - $HOME/.ffxvid - a hidden file.
+* Configuration file-based. Config file is stored in the user's home directory - `$HOME/.ffxvid` - a hidden file.
 * Support for enabling/disabling of audio/video filters in the config file.
 * Functions that detect and display audio/video information in a simple way.
 * Support for batch mode which is used to encode directories with video files in them.
